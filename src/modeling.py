@@ -1,4 +1,9 @@
-"""Modeling and post-cleaning preprocessing for CanAI Café forecasting."""
+"""
+Modeling and post-cleaning preprocessing for CanAI Café forecasting.
+
+This module provides functions to prepare time series data, build features, fit SARIMA models, generate forecasts, and evaluate forecast performance. 
+It is designed for daily sales data and includes utilities for handling missing dates, creating lag and rolling features, and aggregating forecasts to monthly totals.
+"""
 
 from typing import Dict, List, Optional, Tuple
 
@@ -378,7 +383,7 @@ def build_forecast_output(forecast_df: pd.DataFrame) -> pd.DataFrame:
         bins=[-1, 0.1, 0.25, np.inf],
         labels=["low", "medium", "high"],
     )
-    
+
     # Ensure all rows have a risk label, defaulting medium if needed.
     output["risk_level"] = output["risk_level"].cat.add_categories(["medium", "high"]).fillna("medium")
     return output
