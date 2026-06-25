@@ -1,0 +1,32 @@
+{
+    "tables": {
+        "transactions": {
+            "columns": {
+                "Total Spent": {
+                    "sdtype": "numerical"
+                },
+                "Location": {
+                    "sdtype": "categorical"
+                },
+                "Transaction Date": {
+                    "sdtype": "datetime"
+                },
+                "Province": {
+                    "sdtype": "categorical"
+                },
+                "Item": {
+                    "sdtype": "categorical"
+                },
+                "Location_missing_flag": {
+                    "sdtype": "categorical"
+                },
+                "Province_missing_flag": {
+                    "pii": true,
+                    "sdtype": "administrative_unit"
+                }
+            }
+        }
+    },
+    "relationships": [],
+    "METADATA_SPEC_VERSION": "V1"
+}
