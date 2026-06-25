@@ -101,7 +101,8 @@ def validation_comparison_to_dataframe(metrics_by_model: dict[str, dict[str, flo
 
 #directory paths for data and outputs
 PROJECT_ROOT = Path(__file__).resolve().parent  # root of the project directory
-DATA_PATH = PROJECT_ROOT / "data" / "CanAI Cafe 2023 Sales Information.xlsx"  # source dataset path
+RAW_DATA_PATH = PROJECT_ROOT / "data" / "CanAI Cafe 2023 Sales Information.xlsx"  # original raw Excel
+DATA_PATH = PROJECT_ROOT / "data" / "processed" / "cleaned_transactions.csv"  # cleaned dataset (preferred)
 OUTPUT_DIR = PROJECT_ROOT / "reports"  # output directory for forecast results
 
 
@@ -118,9 +119,11 @@ def load_daily_sales() -> pd.DataFrame:
     if not DATA_PATH.exists():
         raise FileNotFoundError(f"Dataset not found: {DATA_PATH}")  # fail fast if source data is missing
 
-    # Read raw Excel data and preserve the original by working on a copy.
-    raw = pd.read_excel(DATA_PATH, engine="openpyxl")
-    raw = raw.copy()
+    # Read CSV or Excel depending on the file extension.
+    if DATA_PATH.suffix.lower() == ".csv":
+        raw = pd.read_csv(DATA_PATH).copy()
+    else:
+        raw = pd.read_excel(DATA_PATH, engine="openpyxl").copy()
 
     required_columns = {"Transaction Date", "Total Spent"}  # expected raw dataset columns
     missing_columns = required_columns.difference(raw.columns)
@@ -221,7 +224,11 @@ def load_raw_transactions() -> pd.DataFrame:
     if not DATA_PATH.exists():
         raise FileNotFoundError(f"Dataset not found: {DATA_PATH}")
 
-    raw = pd.read_excel(DATA_PATH, engine="openpyxl").copy()
+    # Read CSV or Excel depending on the file extension.
+    if DATA_PATH.suffix.lower() == ".csv":
+        raw = pd.read_csv(DATA_PATH).copy()
+    else:
+        raw = pd.read_excel(DATA_PATH, engine="openpyxl").copy()
 
     required_columns = {"Transaction Date", "Total Spent", "Province", "Item"}
     missing_columns = required_columns.difference(raw.columns)
@@ -422,11 +429,17 @@ def train_pipeline() -> None:
     print(top_candidates.to_string(index=False), flush=True)
 
     print("\nTraining SARIMA model with the best validation configuration...", flush=True)
+    # The tuning DataFrame stores None as NaN; convert it back to None so
+    # SARIMAX receives a valid trend value (None means no trend term).
+    best_trend = best_config["trend"]
+    if isinstance(best_trend, float) and pd.isna(best_trend):
+        best_trend = None
+
     fitted_model = fit_sarima_model(
         train["daily_total_sales"],
         order=best_config["order"],
         seasonal_order=best_config["seasonal_order"],
-        trend=best_config["trend"],
+        trend=best_trend,
         maxiter=200,
     )
 
@@ -434,7 +447,7 @@ def train_pipeline() -> None:
         fitted_model,
         best_config["order"],
         best_config["seasonal_order"],
-        best_config["trend"],
+        best_trend,
     )
     print("\nSARIMA diagnostics:", flush=True)
     for key, value in diagnostics.items():
