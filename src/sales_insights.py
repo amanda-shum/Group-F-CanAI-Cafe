@@ -39,9 +39,11 @@ def calculate_sales_insights(
     actual_values: Optional[pd.Series] = None,
     forecast_values: Optional[pd.Series] = None,
     wape: Optional[float] = None,
+    period_start: Optional[pd.Timestamp] = None,
+    period_end: Optional[pd.Timestamp] = None,
 ) -> dict:
     """
-    Calculate sales insights from the full historical daily sales series and
+    Calculate sales insights from the historical daily sales series and
     optional aligned actual/forecast evaluation arrays.
 
     Parameters:
@@ -54,13 +56,18 @@ def calculate_sales_insights(
         wape: Pre-computed WAPE value (0–1 scale). When provided the accuracy
             metric is derived directly from it. When omitted it is re-computed
             from actual_values and forecast_values.
+        period_start: Optional start date (inclusive) to filter historical stats.
+            If None, uses the full range of daily_sales.
+        period_end: Optional end date (inclusive) to filter historical stats.
+            If None, uses the full range of daily_sales.
 
     Returns:
         Dictionary with all insight fields. Unavailable fields are None.
 
     Raises:
         TypeError: When daily_sales does not have a DatetimeIndex.
-        ValueError: When actual_values and forecast_values have different lengths.
+        ValueError: When actual_values and forecast_values have different lengths,
+            or when the period range is invalid.
     """
     # Guard: the series must carry a DatetimeIndex so weekday grouping works.
     if not isinstance(daily_sales.index, pd.DatetimeIndex):
@@ -71,6 +78,20 @@ def calculate_sales_insights(
 
     if sales.empty:
         raise ValueError("daily_sales contains no valid (non-NaN) values.")
+
+    # Filter to the specified period if provided (for monthly or custom insights).
+    if period_start is not None or period_end is not None:
+        if period_start is not None and period_end is not None:
+            if period_start > period_end:
+                raise ValueError(
+                    f"period_start ({period_start}) cannot be after period_end ({period_end})."
+                )
+        sales = sales.loc[period_start:period_end]
+        if sales.empty:
+            raise ValueError(
+                f"No data found in the specified period "
+                f"({period_start} to {period_end})."
+            )
 
     # -----------------------------------------------------------------------
     # Historical statistics
@@ -180,6 +201,109 @@ def calculate_sales_insights(
         "wape": wape,
         "forecast_accuracy": forecast_accuracy,
     }
+
+
+# ---------------------------------------------------------------------------
+# Period filtering and validation
+# ---------------------------------------------------------------------------
+
+def get_available_date_range(daily_sales: pd.Series) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """
+    Get the minimum and maximum dates available in the sales data.
+
+    Parameters:
+        daily_sales: Complete daily sales series with a DatetimeIndex.
+
+    Returns:
+        Tuple of (min_date, max_date) after dropping NaN values.
+
+    Raises:
+        TypeError: When daily_sales does not have a DatetimeIndex.
+        ValueError: When daily_sales contains no valid (non-NaN) values.
+    """
+    if not isinstance(daily_sales.index, pd.DatetimeIndex):
+        raise TypeError("daily_sales must have a DatetimeIndex.")
+
+    sales = daily_sales.dropna()
+    if sales.empty:
+        raise ValueError("daily_sales contains no valid (non-NaN) values.")
+
+    return sales.index.min(), sales.index.max()
+
+
+def prompt_for_period(daily_sales: pd.Series) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """
+    Prompt the user to enter a month/year (YYYY-MM format) and return the start
+    and end dates (first and last day of that month). Validates that the month
+    exists in the available dataset.
+
+    Parameters:
+        daily_sales: Complete daily sales series with a DatetimeIndex.
+            Used to validate the entered period exists in the data.
+
+    Returns:
+        Tuple of (period_start, period_end) representing the first and last day
+        of the requested month.
+
+    Raises:
+        Errors are caught and reprompted; only successful validation returns.
+    """
+    min_date, max_date = get_available_date_range(daily_sales)
+
+    while True:
+        print(
+            f"\nAvailable data range: {min_date.strftime('%Y-%m-%d')} to {max_date.strftime('%Y-%m-%d')}",
+            flush=True,
+        )
+        month_input = input(
+            "Enter a month for historical insights (YYYY-MM format, e.g., 2023-03): "
+        ).strip()
+
+        try:
+            # Parse the input as YYYY-MM and create the first day of that month.
+            period_start = pd.Timestamp(month_input + "-01")
+
+            # Compute the last day of the month (first day of next month minus 1 day).
+            if period_start.month == 12:
+                period_end = (
+                    pd.Timestamp(year=period_start.year + 1, month=1, day=1)
+                    - pd.Timedelta(days=1)
+                )
+            else:
+                period_end = (
+                    pd.Timestamp(
+                        year=period_start.year,
+                        month=period_start.month + 1,
+                        day=1,
+                    )
+                    - pd.Timedelta(days=1)
+                )
+
+            # Validate that the month falls within the available data range.
+            if period_start > max_date or period_end < min_date:
+                print(
+                    f"Error: Month {month_input} is outside the available data range. "
+                    f"Available: {min_date.strftime('%Y-%m')} to {max_date.strftime('%Y-%m')}",
+                    flush=True,
+                )
+                continue
+
+            # Clamp the period to the available data range (in case user enters
+            # a partial month at the boundaries).
+            period_start = max(period_start, min_date)
+            period_end = min(period_end, max_date)
+
+            print(
+                f"Selected: {period_start.strftime('%Y-%m-%d')} to {period_end.strftime('%Y-%m-%d')}",
+                flush=True,
+            )
+            return period_start, period_end
+
+        except (ValueError, pd.errors.ParserError):
+            print(
+                "Error: Invalid format. Please enter the month as YYYY-MM (e.g., 2023-03).",
+                flush=True,
+            )
 
 
 # ---------------------------------------------------------------------------
