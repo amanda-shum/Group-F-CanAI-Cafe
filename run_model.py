@@ -8,7 +8,7 @@ Commands:
     test  - retrain on train+validation, evaluate on test data, generate a 6-month forecast, and optionally save outputs.
 
 This script loads daily sales from the Excel file, trains a SARIMA forecasting pipeline,
-validates performance, evaluates on a held-out test set, and optionally saves results
+validates performance, evaluates on a test set, and optionally saves results
 including a 6-month forecast.
 """
 
