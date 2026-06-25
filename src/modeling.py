@@ -1,8 +1,10 @@
 """
 Modeling and post-cleaning preprocessing for CanAI Café forecasting.
 
-This module provides functions to prepare time series data, build features, fit SARIMA models, generate forecasts, and evaluate forecast performance. 
-It is designed for daily sales data and includes utilities for handling missing dates, creating lag and rolling features, and aggregating forecasts to monthly totals.
+This module provides functions to prepare time series data, build features, fit SARIMA models, 
+generate forecasts, and evaluate forecast performance using multiple approaches (SARIMA and Ridge Regression).
+It is designed for daily sales data and includes utilities for handling missing dates, creating lag and 
+rolling features, and aggregating forecasts to monthly totals.
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -10,6 +12,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from statsmodels.tsa.statespace.sarimax import SARIMAX
+from sklearn.linear_model import Ridge
+from sklearn.preprocessing import StandardScaler
 import warnings
 
 
@@ -775,3 +779,148 @@ def build_forecast_output(forecast_df: pd.DataFrame) -> pd.DataFrame:
         risk_level = risk_level.cat.add_categories(missing_categories)
     output["risk_level"] = risk_level.fillna("medium")
     return output
+
+
+# ---------------------------------------------------------------------------
+# Ridge Regression Forecasting
+# ---------------------------------------------------------------------------
+
+def build_ridge_features(
+    daily_sales: pd.Series,
+    raw_transactions: Optional[pd.DataFrame] = None,
+    lags: List[int] = None,
+    windows: List[int] = None,
+) -> Tuple[pd.DataFrame, pd.Series]:
+    """
+    Build feature matrix for Ridge Regression from daily sales and transaction data.
+    
+    Features include:
+    - Lag features (previous sales from 1, 7, 14 days)
+    - Rolling window features (moving averages and standard deviations)
+    - Calendar features (day of week, day of month, month, weekend indicator)
+    - Categorical features (top items and provinces from transaction data)
+    
+    Parameters:
+        daily_sales: Series of daily sales amounts with DatetimeIndex.
+        raw_transactions: Optional raw transaction DataFrame with Item and Province columns.
+        lags: List of lag periods to include (default: [1, 7, 14]).
+        windows: List of rolling window sizes (default: [7, 14]).
+    
+    Returns:
+        Tuple of (feature_matrix, target_series) ready for Ridge fitting.
+    """
+    if lags is None:
+        lags = [1, 7, 14]
+    if windows is None:
+        windows = [7, 14]
+    
+    # Ensure daily_sales is float for numerical operations
+    daily_sales = daily_sales.astype(float)
+    
+    features = pd.DataFrame(index=daily_sales.index)
+    
+    # Lag features: previous day, week, and longer-term sales.
+    for lag in lags:
+        features[f"lag_{lag}"] = daily_sales.shift(lag)
+    
+    # Rolling window features: moving averages and standard deviations.
+    for window in windows:
+        features[f"rolling_mean_{window}"] = daily_sales.rolling(window=window).mean()
+        features[f"rolling_std_{window}"] = daily_sales.rolling(window=window).std()
+    
+    # Calendar features extracted from the DatetimeIndex.
+    features["day_of_week"] = features.index.dayofweek
+    features["day_of_month"] = features.index.day
+    features["month"] = features.index.month
+    features["is_weekend"] = (features["day_of_week"] >= 5).astype(int)
+    
+    # Add categorical features from transaction data if available.
+    if raw_transactions is not None and not raw_transactions.empty:
+        try:
+            trans = raw_transactions.copy()
+            
+            # Parse dates
+            trans["Transaction Date"] = pd.to_datetime(trans["Transaction Date"], errors="coerce")
+            trans = trans.dropna(subset=["Transaction Date"])
+            trans["date"] = trans["Transaction Date"].dt.normalize()
+            
+            # Get daily sales by item
+            if "Item" in trans.columns:
+                item_daily = trans.groupby(["date", "Item"])["Total Spent"].sum().unstack(fill_value=0)
+                item_daily.index = pd.to_datetime(item_daily.index)
+                
+                # Use top 5 items as features
+                top_items = item_daily.sum().nlargest(5).index
+                for item in top_items:
+                    if item in item_daily.columns:
+                        clean_name = item.lower().replace(" ", "_").replace("-", "_")
+                        features[f"item_{clean_name}"] = item_daily[item]
+            
+            # Get daily sales by province
+            if "Province" in trans.columns:
+                prov_daily = trans.groupby(["date", "Province"])["Total Spent"].sum().unstack(fill_value=0)
+                prov_daily.index = pd.to_datetime(prov_daily.index)
+                
+                # Use top 3 provinces as features
+                top_provs = prov_daily.sum().nlargest(3).index
+                for prov in top_provs:
+                    if prov in prov_daily.columns and str(prov).strip() != "Missing":
+                        clean_name = str(prov).lower().replace(" ", "_").replace("-", "_")
+                        features[f"prov_{clean_name}"] = prov_daily[prov]
+        except Exception as e:
+            # If categorical feature engineering fails, continue without them
+            print(f"Warning: Could not extract categorical features: {e}", flush=True)
+    
+    # Forward fill missing values from items/provinces, then drop remaining NaN
+    features = features.ffill()
+    features = features.dropna()
+    target = daily_sales.loc[features.index]
+    
+    return features, target
+
+
+def fit_ridge_regression(
+    features: pd.DataFrame,
+    target: pd.Series,
+    alpha: float = 1.0,
+) -> Tuple[Ridge, StandardScaler]:
+    """
+    Fit a Ridge Regression model to the feature matrix.
+    
+    Parameters:
+        features: Feature matrix (rows: samples, columns: features).
+        target: Target series (daily sales).
+        alpha: Ridge regularization parameter (default: 1.0).
+    
+    Returns:
+        Tuple of (fitted Ridge model, scaler for feature normalization).
+    """
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(features)
+    
+    model = Ridge(alpha=alpha, random_state=42, max_iter=5000)
+    model.fit(X_scaled, target.values)
+    
+    return model, scaler
+
+
+def predict_ridge_regression(
+    model: Ridge,
+    scaler: StandardScaler,
+    features: pd.DataFrame,
+) -> pd.Series:
+    """
+    Generate predictions using a fitted Ridge Regression model.
+    
+    Parameters:
+        model: Fitted Ridge Regression model.
+        scaler: StandardScaler fitted on training features.
+        features: Feature matrix for prediction.
+    
+    Returns:
+        Series of predictions with the same index as input features.
+    """
+    X_scaled = scaler.transform(features)
+    predictions = model.predict(X_scaled)
+    return pd.Series(predictions, index=features.index)
+

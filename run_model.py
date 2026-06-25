@@ -22,15 +22,18 @@ from src.modeling import (
     aggregate_daily_sales_by_group,
     build_calendar_features,
     build_forecast_output,
+    build_ridge_features,
     calculate_forecast_metrics,
     clip_negative_forecasts,
     complete_grouped_daily_sales,
     ensure_daily_index,
     extract_daily_sales_series,
+    fit_ridge_regression,
     fit_sarima_model,
     generate_sarima_forecast,
     get_model_diagnostics,
     naive_forecast,
+    predict_ridge_regression,
     seasonal_naive_forecast,
     split_time_series,
     tune_sarima_parameters,
@@ -55,6 +58,40 @@ def format_metric_value(metric: str, value: float) -> str:
     if metric == "MAPE":
         return f"{value:.2f}%"
     return str(value)
+
+
+def print_ridge_regression_details(ridge_model, ridge_features: pd.DataFrame) -> None:
+    """
+    Display Ridge Regression model details including feature importance.
+    
+    Parameters:
+        ridge_model: Fitted Ridge model object.
+        ridge_features: Feature matrix used for training.
+    """
+    print("\nRIDGE REGRESSION MODEL DETAILS", flush=True)
+    print("=" * 65, flush=True)
+    
+    # Model parameters
+    print(f"Number of features: {len(ridge_features.columns)}", flush=True)
+    print(f"Number of training samples: {len(ridge_features)}", flush=True)
+    print(f"Model intercept: ${ridge_model.intercept_:,.2f}", flush=True)
+    print(f"Regularization parameter (alpha): {ridge_model.alpha}", flush=True)
+    
+    # Feature importance (top 10 by absolute coefficient)
+    feature_importance = pd.DataFrame({
+        'Feature': ridge_features.columns,
+        'Coefficient': ridge_model.coef_
+    })
+    feature_importance['Abs_Coefficient'] = feature_importance['Coefficient'].abs()
+    feature_importance = feature_importance.sort_values('Abs_Coefficient', ascending=False)
+    
+    print("\nTop 10 Most Important Features:", flush=True)
+    print("-" * 65, flush=True)
+    print(f"{'Feature':<30}{'Coefficient':>15}{'Impact':>18}", flush=True)
+    print("-" * 65, flush=True)
+    for idx, row in feature_importance.head(10).iterrows():
+        print(f"{row['Feature']:<30}{row['Coefficient']:>15.4f}    {'↑' if row['Coefficient'] > 0 else '↓':>2}", flush=True)
+    print("=" * 65, flush=True)
 
 
 def print_model_comparison(metrics_by_model: dict[str, dict[str, float]]) -> None:
@@ -480,10 +517,67 @@ def train_pipeline() -> None:
     seasonal_metrics = calculate_forecast_metrics(actual, seasonal_pred)
     sarima_metrics = calculate_forecast_metrics(actual, sarima_pred)
 
+    # Build and fit Ridge Regression model for comparison.
+    print("\nBuilding Ridge Regression features for validation comparison...", flush=True)
+    try:
+        # Create a time series from daily_input for Ridge feature engineering.
+        daily_series = extract_daily_sales_series(
+            daily_input,
+            sales_col="daily_total_sales",
+            date_col="date",
+        )
+        
+        raw_transactions = load_raw_transactions()
+        ridge_features, ridge_target = build_ridge_features(daily_series, raw_transactions=raw_transactions, lags=[1, 7, 14], windows=[7, 14])
+        
+        # Use positional indices instead of date filtering to avoid key errors
+        train_size = len(train)
+        val_size = len(validation)
+        
+        # Train features are from beginning until end of training period
+        ridge_features_train = ridge_features.iloc[:len(ridge_features) - val_size]
+        ridge_target_train = ridge_target.iloc[:len(ridge_target) - val_size]
+        
+        # Validation features are from end of training until end of validation
+        ridge_features_val = ridge_features.iloc[len(ridge_features) - val_size:]
+        ridge_target_val = ridge_target.iloc[len(ridge_target) - val_size:]
+        
+        if len(ridge_features_train) > 5 and len(ridge_features_val) > 0:
+            ridge_model, ridge_scaler = fit_ridge_regression(
+                ridge_features_train,
+                ridge_target_train,
+                alpha=1.0,
+            )
+            
+            # Display Ridge Regression training details
+            print_ridge_regression_details(ridge_model, ridge_features_train)
+            
+            ridge_pred = predict_ridge_regression(ridge_model, ridge_scaler, ridge_features_val)
+            
+            # Align predictions with actual validation values
+            ridge_pred_aligned = pd.Series(ridge_pred.values, index=ridge_features_val.index)
+            if len(ridge_pred_aligned) >= len(actual):
+                ridge_pred_aligned = ridge_pred_aligned.iloc[:len(actual)]
+                ridge_pred_aligned.index = actual.index
+                ridge_metrics = calculate_forecast_metrics(actual, ridge_pred_aligned)
+            else:
+                print(f"Ridge: Prediction length ({len(ridge_pred_aligned)}) < Actual length ({len(actual)}), using available predictions.", flush=True)
+                # Pad with NaN if needed
+                ridge_pred_padded = pd.Series([float('nan')] * len(actual), index=actual.index)
+                ridge_pred_padded.iloc[:len(ridge_pred_aligned)] = ridge_pred_aligned.values
+                ridge_metrics = calculate_forecast_metrics(actual, ridge_pred_padded)
+        else:
+            print("Ridge: Not enough features for training, skipping Ridge Regression.", flush=True)
+            ridge_metrics = {"MAE": float("nan"), "RMSE": float("nan"), "WAPE": float("nan"), "MAPE": float("nan")}
+    except Exception as e:
+        print(f"Ridge Regression failed: {type(e).__name__}: {e}. Skipping Ridge model.", flush=True)
+        ridge_metrics = {"MAE": float("nan"), "RMSE": float("nan"), "WAPE": float("nan"), "MAPE": float("nan")}
+
     metrics_by_model = {
         "Naive": naive_metrics,
         "Seasonal Naive": seasonal_metrics,
         "SARIMA": sarima_metrics,
+        "Ridge Regression": ridge_metrics,
     }
     print_model_comparison(metrics_by_model)
 
@@ -620,9 +714,84 @@ def test_pipeline() -> None:
 
     test_metrics = calculate_forecast_metrics(test_actual, test_prediction)
 
+    # Build and fit Ridge Regression model for test comparison.
+    print("\nBuilding Ridge Regression features for test evaluation...", flush=True)
+    try:
+        # Create a time series from daily_input for Ridge feature engineering.
+        daily_series = extract_daily_sales_series(
+            daily_input,
+            sales_col="daily_total_sales",
+            date_col="date",
+        )
+        
+        raw_transactions = load_raw_transactions()
+        ridge_features, ridge_target = build_ridge_features(daily_series, raw_transactions=raw_transactions, lags=[1, 7, 14], windows=[7, 14])
+        
+        # Use positional indices instead of date filtering to avoid key errors
+        train_size = len(train)
+        val_size = len(validation)
+        test_size = len(test)
+        
+        # Train+validation features
+        ridge_features_train_val = ridge_features.iloc[:train_size + val_size]
+        ridge_target_train_val = ridge_target.iloc[:train_size + val_size]
+        
+        # Test features
+        ridge_features_test = ridge_features.iloc[train_size + val_size:]
+        ridge_target_test = ridge_target.iloc[train_size + val_size:]
+        
+        if len(ridge_features_train_val) > 5 and len(ridge_features_test) > 0:
+            ridge_model, ridge_scaler = fit_ridge_regression(
+                ridge_features_train_val,
+                ridge_target_train_val,
+                alpha=1.0,
+            )
+            
+            # Display Ridge Regression test details
+            print_ridge_regression_details(ridge_model, ridge_features_train_val)
+            
+            ridge_test_pred = predict_ridge_regression(ridge_model, ridge_scaler, ridge_features_test)
+            
+            # Align predictions with actual test values
+            ridge_test_pred_aligned = pd.Series(ridge_test_pred.values, index=ridge_features_test.index)
+            if len(ridge_test_pred_aligned) >= len(test_actual):
+                ridge_test_pred_aligned = ridge_test_pred_aligned.iloc[:len(test_actual)]
+                ridge_test_pred_aligned.index = test_actual.index
+                ridge_test_metrics = calculate_forecast_metrics(test_actual, ridge_test_pred_aligned)
+            else:
+                print(f"Ridge: Prediction length ({len(ridge_test_pred_aligned)}) < Actual length ({len(test_actual)}), using available predictions.", flush=True)
+                # Pad with NaN if needed
+                ridge_test_pred_padded = pd.Series([float('nan')] * len(test_actual), index=test_actual.index)
+                ridge_test_pred_padded.iloc[:len(ridge_test_pred_aligned)] = ridge_test_pred_aligned.values
+                ridge_test_metrics = calculate_forecast_metrics(test_actual, ridge_test_pred_padded)
+        else:
+            print("Ridge: Not enough features for test evaluation, skipping Ridge Regression.", flush=True)
+            ridge_test_metrics = {"MAE": float("nan"), "RMSE": float("nan"), "WAPE": float("nan"), "MAPE": float("nan")}
+    except Exception as e:
+        print(f"Ridge Regression test failed: {type(e).__name__}: {e}. Skipping Ridge model.", flush=True)
+        ridge_test_metrics = {"MAE": float("nan"), "RMSE": float("nan"), "WAPE": float("nan"), "MAPE": float("nan")}
+
     print("\nFinal test metrics:", flush=True)
-    for name, value in test_metrics.items():
-        print(f"{name}: {value:.4f}", flush=True)
+    print("\nVALIDATION MODEL COMPARISON", flush=True)
+    print("=" * 65, flush=True)
+    print(
+        f"{'Model':<18}{'MAE':>12}{'RMSE':>12}{'WAPE':>12}{'MAPE':>12}",
+        flush=True,
+    )
+    print("-" * 65, flush=True)
+    
+    test_metrics_by_model = {
+        "SARIMA": test_metrics,
+        "Ridge Regression": ridge_test_metrics,
+    }
+    
+    for model_name, metrics in test_metrics_by_model.items():
+        mae = format_metric_value("MAE", metrics.get("MAE", float("nan")))
+        rmse = format_metric_value("RMSE", metrics.get("RMSE", float("nan")))
+        wape = format_metric_value("WAPE", metrics.get("WAPE", float("nan")))
+        mape = format_metric_value("MAPE", metrics.get("MAPE", float("nan")))
+        print(f"{model_name:<18}{mae:>12}{rmse:>12}{wape:>12}{mape:>12}", flush=True)
+    print("=" * 65, flush=True)
 
     print("\nGenerating a 6-month forecast from the final model...", flush=True)
     
@@ -689,12 +858,14 @@ def test_pipeline() -> None:
         daily_output_path = OUTPUT_DIR / "daily_forecast.csv"
         monthly_output_path = OUTPUT_DIR / "monthly_forecast.csv"
         metrics_output_path = OUTPUT_DIR / "forecast_metrics.csv"
+        comparison_output_path = OUTPUT_DIR / "test_model_comparison.csv"
         six_month_output_path = OUTPUT_DIR / "six_month_forecast.csv"
         a_output_path = PROJECT_ROOT / "a.csv"
 
         final.to_csv(daily_output_path, index_label="date")
         monthly.to_csv(monthly_output_path, index_label="month")
         pd.DataFrame([test_metrics]).to_csv(metrics_output_path, index=False)
+        validation_comparison_to_dataframe(test_metrics_by_model).to_csv(comparison_output_path, index=False)
         six_month_forecast.to_csv(six_month_output_path, index_label="date")
         final.to_csv(a_output_path, index_label="date")
 
@@ -702,6 +873,7 @@ def test_pipeline() -> None:
         print(f"- {daily_output_path}", flush=True)
         print(f"- {monthly_output_path}", flush=True)
         print(f"- {metrics_output_path}", flush=True)
+        print(f"- {comparison_output_path}", flush=True)
         print(f"- {six_month_output_path}", flush=True)
         print(f"- {a_output_path}", flush=True)
 

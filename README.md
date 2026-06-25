@@ -157,22 +157,30 @@ Save sales insights to CSV? Enter 'y' to save or 'n' to skip:
 - **Naive Forecast**: Simple last-value baseline
 - **Seasonal Naive**: Day-of-week patterns
 - **SARIMA**: Seasonal ARIMA with automatic tuning
+- **Ridge Regression**: Menu items, provinces, calendar features, and recent sales history
 - Compares using MAE, RMSE, WAPE, and MAPE metrics
 
-### 4. **Monthly Historical Insights**
+### 4. **Ridge Regression Forecasting**
+- Lag features: Previous sales (1, 7, 14 days)
+- Rolling window features: Moving averages and standard deviations (7, 14 days)
+- Calendar features: Day of week, month, weekend indicators
+- Categorical features: Top 5 menu items and top 3 provinces
+- Feature normalization and L2 regularization for stable predictions
+
+### 5. **Monthly Historical Insights**
 - User-selected time periods (by month, YYYY-MM)
 - Daily aggregation with proper date validation
 - Weekday-level analysis (busiest days)
 - Best/worst performing days with amounts
 - CSV export for easy sharing
 
-### 5. **Extended Forecasting**
+### 6. **Extended Forecasting**
 - 6-month forward forecast from end of training data
 - Monthly aggregation from daily predictions
 - Confidence intervals and bounds
 - Prophet-style trend visualization ready
 
-### 6. **Automated Reporting**
+### 7. **Automated Reporting**
 - Validation metrics comparison table
 - Daily and monthly forecast exports
 - Province and item-level sales breakdowns
@@ -244,6 +252,20 @@ The model uses seasonal ARIMA (SARIMA) with:
 Best model is selected by:
 1. Lowest WAPE (primary metric)
 2. Lowest MAE (secondary metric)
+
+### Ridge Regression Parameters
+The model uses L2 regularized linear regression with:
+- **Lag Features**: Sales from 1, 7, and 14 days prior
+- **Rolling Features**: 7-day and 14-day moving averages and standard deviations
+- **Calendar Features**: Day of week, day of month, month, weekend indicator
+- **Categorical Features**: One-hot encoded top 5 items and top 3 provinces
+- **Regularization (alpha)**: Default 1.0, higher values increase regularization
+- **Feature Scaling**: StandardScaler normalization applied to all features
+
+Ridge Regression complements SARIMA by capturing:
+- Weekly item sales patterns (menu-specific seasonality)
+- Regional sales differences (province-level variations)
+- Multi-week historical dependencies
 
 ## Testing
 
