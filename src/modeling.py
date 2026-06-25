@@ -5,11 +5,12 @@ This module provides functions to prepare time series data, build features, fit 
 It is designed for daily sales data and includes utilities for handling missing dates, creating lag and rolling features, and aggregating forecasts to monthly totals.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 from statsmodels.tsa.statespace.sarimax import SARIMAX
+import warnings
 
 
 def ensure_daily_index(df: pd.DataFrame, date_col: str = "date") -> pd.DataFrame:
@@ -24,16 +25,19 @@ def ensure_daily_index(df: pd.DataFrame, date_col: str = "date") -> pd.DataFrame
         DataFrame indexed by date with daily frequency enforced.
     """
     df = df.copy()
-    # Convert the date column to datetime; invalid values become NaT.
+
+    # Convert the date column to a datetime index. Any value that cannot be parsed
+    # becomes NaT, which allows us to detect and remove invalid rows.
     df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
 
-    # Drop rows without a valid date before indexing.
+    # Remove rows that have no valid date, because those cannot be used in a time series.
     df = df.dropna(subset=[date_col])
 
-    # Use the date column as the index and sort the data chronologically.
+    # Set the normalized datetime column as the index and make sure rows are ordered.
     df = df.set_index(date_col).sort_index()
 
-    # Force a daily frequency so missing dates are visible as NaN.
+    # Enforce a daily frequency so that all calendar dates appear explicitly in the index.
+    # Missing dates become NaN and can be filled or used to create complete series later.
     df = df.asfreq("D")
 
     return df
@@ -51,15 +55,195 @@ def extract_daily_sales_series(df: pd.DataFrame, sales_col: str = "daily_total_s
     Returns:
         A Pandas Series of daily sales values indexed by date.
     """
-    # Ensure the data has a proper daily index before extracting.
+    # Ensure the data has a proper daily index before extracting, which also makes
+    # the series continuous and easier to model with SARIMA.
     daily = ensure_daily_index(df, date_col=date_col)
 
-    # Validate the expected sales column exists.
+    # Confirm we have the sales column that the caller expects. This protects against
+    # upstream schema changes or malformed data frames.
     if sales_col not in daily.columns:
         raise KeyError(f"Expected sales column '{sales_col}' not found")
-    
-    # Convert sales values to float to support modeling.
+
+    # Return the sales series as floats, which is required by the forecasting routines.
     return daily[sales_col].astype(float)
+
+
+def aggregate_daily_sales_by_group(
+    df: pd.DataFrame,
+    group_cols: Optional[List[str]] = None,
+    date_col: str = "Transaction Date",
+    sales_col: str = "Total Spent",
+) -> pd.DataFrame:
+    """
+    Aggregate raw transactions to daily sales totals at the requested group level.
+
+    Parameters:
+        df: Raw transaction data.
+        group_cols: Columns to group by, e.g. ["Province"] or ["Item"].
+        date_col: Date column name in the raw data.
+        sales_col: Sales amount column name in the raw data.
+
+    Returns:
+        DataFrame with grouped daily totals and normalized dates.
+    """
+    df = df.copy()
+    if group_cols is None:
+        group_cols = []
+
+    # Parse raw dates and quantities so invalid rows can be dropped cleanly.
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+    df[sales_col] = pd.to_numeric(df[sales_col], errors="coerce")
+
+    # Remove any transactions missing either a valid date, sales amount, or required group key.
+    required_cols = [date_col, sales_col] + group_cols
+    df = df.dropna(subset=required_cols)
+
+    # Normalize the transaction timestamp to a calendar day and group on that day.
+    df = df.assign(date=df[date_col].dt.normalize())
+
+    # Aggregate daily sales at the requested group level.
+    grouped = (
+        df.groupby(group_cols + ["date"], as_index=False)[sales_col]
+        .sum()
+        .rename(columns={sales_col: "daily_total_sales"})
+    )
+
+    # Sort results by group and date so downstream code can assume ordered data.
+    return grouped.sort_values(group_cols + ["date"]).reset_index(drop=True)
+
+
+def complete_grouped_daily_sales(
+    grouped_df: pd.DataFrame,
+    group_cols: List[str],
+    date_col: str = "date",
+    sales_col: str = "daily_total_sales",
+) -> pd.DataFrame:
+    """
+    Fill missing dates for each group so every group has a complete daily series.
+
+    Parameters:
+        grouped_df: Aggregated grouped sales data by date.
+        group_cols: Columns that define each group.
+        date_col: Name of the date column in the grouped DataFrame.
+        sales_col: Name of the daily sales total column.
+
+    Returns:
+        DataFrame with a complete daily date range per group.
+    """
+    grouped_df = grouped_df.copy()
+
+    # Normalize the date column for every row before building complete calendars.
+    grouped_df[date_col] = pd.to_datetime(grouped_df[date_col], errors="coerce")
+    grouped_df = grouped_df.dropna(subset=[date_col] + group_cols)
+
+    frames: List[pd.DataFrame] = []
+    for key_values, group in grouped_df.groupby(group_cols, sort=False):
+        # Build a full daily index for the current group and preserve any missing days.
+        group = group.set_index(date_col).sort_index()
+        full_index = pd.date_range(start=group.index.min(), end=group.index.max(), freq="D")
+
+        # Reindex the group to include every date in the range, filling absent days with zero sales.
+        group = group.reindex(full_index, fill_value=0.0)
+        group = group.reset_index().rename(columns={"index": date_col})
+
+        # Restore group identity values after the reindex operation.
+        if isinstance(key_values, tuple):
+            for col, value in zip(group_cols, key_values):
+                group[col] = value
+        else:
+            group[group_cols[0]] = key_values
+
+        frames.append(group)
+
+    if not frames:
+        return pd.DataFrame(columns=group_cols + [date_col, sales_col])
+
+    result = pd.concat(frames, ignore_index=True)
+
+    # Return the grouped DataFrame with the same ordered columns used throughout the pipeline.
+    return result[group_cols + [date_col, sales_col]]
+
+
+def clip_negative_forecasts(forecast_df: pd.DataFrame, forecast_col: str = "forecast") -> pd.DataFrame:
+    """
+    Replace negative forecast values with zero while preserving intervals.
+
+    Parameters:
+        forecast_df: DataFrame with forecast values.
+        forecast_col: Name of the forecast column to clip.
+
+    Returns:
+        DataFrame with clipped forecast values.
+    """
+    result = forecast_df.copy()
+    if forecast_col in result.columns:
+        result[forecast_col] = result[forecast_col].clip(lower=0.0)
+    return result
+
+
+def forecast_grouped_sales(
+    grouped_daily_sales: pd.DataFrame,
+    group_cols: List[str],
+    forecast_steps: int,
+    date_col: str = "date",
+    sales_col: str = "daily_total_sales",
+    min_history: int = 14,
+    order: Tuple[int, int, int] = (1, 1, 1),
+    seasonal_order: Tuple[int, int, int, int] = (1, 0, 1, 7),
+    trend: Optional[str] = "c",
+) -> pd.DataFrame:
+    """
+    Generate SARIMA forecasts for each group in grouped daily sales.
+
+    Parameters:
+        grouped_daily_sales: Grouped daily sales DataFrame.
+        group_cols: Columns that define each group.
+        forecast_steps: Forecast horizon in days.
+        min_history: Minimum history required to fit a group model.
+        order: Non-seasonal ARIMA order.
+        seasonal_order: Seasonal ARIMA order.
+        trend: Trend parameter for SARIMA.
+
+    Returns:
+        DataFrame with forecasts and group labels for each horizon day.
+    """
+    forecasts: List[pd.DataFrame] = []
+    for key_values, group in grouped_daily_sales.groupby(group_cols, sort=False):
+        if len(group) < min_history:
+            # Skip groups that do not have enough historical points to fit a SARIMA model.
+            continue
+
+        # Extract the group's daily sales series, filling any NaNs created by resampling.
+        series = extract_daily_sales_series(group, sales_col=sales_col, date_col=date_col).fillna(0.0)
+
+        # Fit a SARIMA model for this group and generate the requested forecast horizon.
+        fitted = fit_sarima_model(
+            series,
+            order=order,
+            seasonal_order=seasonal_order,
+            trend=trend,
+        )
+        forecast_df = generate_sarima_forecast(fitted, steps=forecast_steps)
+
+        # Force negative predictions to zero so forecasts remain realistic for sales data.
+        forecast_df = clip_negative_forecasts(forecast_df)
+
+        # Move the index back into a date column to keep grouped metadata aligned.
+        forecast_df = forecast_df.reset_index().rename(columns={"index": date_col})
+
+        # Attach the group identifier columns to the forecast results.
+        if isinstance(key_values, tuple):
+            for col, value in zip(group_cols, key_values):
+                forecast_df[col] = value
+        else:
+            forecast_df[group_cols[0]] = key_values
+
+        forecasts.append(forecast_df)
+
+    if not forecasts:
+        return pd.DataFrame(columns=group_cols + [date_col, "forecast", "lower_bound", "upper_bound"])
+
+    return pd.concat(forecasts, ignore_index=True)
 
 
 def build_calendar_features(df: pd.DataFrame, date_col: str = "date") -> pd.DataFrame:
@@ -187,7 +371,7 @@ def seasonal_naive_forecast(train_series: pd.Series, forecast_steps: int, season
         forecast_steps: Number of future days to forecast.
         season_length: Seasonal period in days used for the seasonal-naïve forecast.
 
-    Returns:
+    Returns:s
         A Pandas Series containing repeated values from the most recent seasonal window.
     """
     if len(train_series) < season_length:
@@ -284,24 +468,213 @@ def generate_sarima_forecast(
     return forecast_df
 
 
-def clip_negative_forecasts(forecast_df: pd.DataFrame, forecast_col: str = "forecast") -> pd.DataFrame:
-    """
-    Clip negative forecast values to zero for realistic sales forecasts.
+def get_model_diagnostics(
+    fitted_model: Any,
+    order: Tuple[int, int, int],
+    seasonal_order: Tuple[int, int, int, int],
+    trend: Optional[str],
+) -> Dict[str, Any]:
+    """Return a compact diagnostics summary for a fitted SARIMA model."""
+    diagnostics: Dict[str, Any] = {
+        "order": order,
+        "seasonal_order": seasonal_order,
+        "trend": trend,
+        "aic": getattr(fitted_model, "aic", np.nan),
+        "bic": getattr(fitted_model, "bic", np.nan),
+        "converged": bool(getattr(getattr(fitted_model, "mle_retvals", {}), "get", lambda k, d: d)("converged", True)),
+    }
+    residuals = getattr(fitted_model, "resid", None)
+    if residuals is not None:
+        diagnostics["residual_mean"] = float(np.mean(residuals))
+        diagnostics["residual_std"] = float(np.std(residuals, ddof=0))
+    else:
+        diagnostics["residual_mean"] = np.nan
+        diagnostics["residual_std"] = np.nan
+    return diagnostics
 
-    Parameters:
-        forecast_df: Forecast data containing predicted and interval columns.
-        forecast_col: Name of the forecast column to clip.
 
-    Returns:
-        DataFrame with negative values clipped to zero.
-    """
-    forecast_df = forecast_df.copy()
+def tune_sarima_parameters(
+    train_series: pd.Series,
+    validation_series: pd.Series,
+    orders: Optional[List[Tuple[int, int, int]]] = None,
+    seasonal_orders: Optional[List[Tuple[int, int, int, int]]] = None,
+    trends: Optional[List[Optional[str]]] = None,
+    maxiter: int = 1000,
+    suppress_warnings: bool = True,
+) -> Tuple[Dict[str, Any], pd.DataFrame]:
+    """Search a small SARIMA parameter space and select the best configuration by validation WAPE."""
+    if orders is None:
+        orders = [(0, 1, 1), (1, 0, 1), (1, 1, 0), (1, 1, 1), (2, 1, 1)]
+    if seasonal_orders is None:
+        seasonal_orders = [
+            (0, 0, 1, 7),
+            (1, 0, 0, 7),
+            (1, 0, 1, 7),
+            (0, 1, 1, 7),
+            (1, 1, 1, 7),
+        ]
+    if trends is None:
+        trends = [None, "c"]
 
-    # Sales cannot be negative, so clamp the forecast and interval bounds.
-    forecast_df[forecast_col] = forecast_df[forecast_col].clip(lower=0.0)
-    forecast_df["lower_bound"] = forecast_df["lower_bound"].clip(lower=0.0)
-    forecast_df["upper_bound"] = forecast_df["upper_bound"].clip(lower=0.0)
-    return forecast_df
+    rows: List[Dict[str, Any]] = []
+    validation_series = validation_series.astype(float)
+
+    for order in orders:
+        for seasonal_order in seasonal_orders:
+            for trend in trends:
+                row: Dict[str, Any] = {
+                    "order": order,
+                    "seasonal_order": seasonal_order,
+                    "trend": trend,
+                    "MAE": np.nan,
+                    "RMSE": np.nan,
+                    "WAPE": np.nan,
+                    "MAPE": np.nan,
+                    "AIC": np.nan,
+                    "BIC": np.nan,
+                    "converged": False,
+                    "status": "not evaluated",
+                }
+                try:
+                    with warnings.catch_warnings():
+                        if suppress_warnings:
+                            warnings.simplefilter("ignore")
+                        fitted = fit_sarima_model(
+                            train_series,
+                            order=order,
+                            seasonal_order=seasonal_order,
+                            trend=trend,
+                            maxiter=maxiter,
+                        )
+
+                    forecast_df = generate_sarima_forecast(fitted, steps=len(validation_series))
+                    forecast_df = clip_negative_forecasts(forecast_df)
+                    prediction = forecast_df["forecast"].copy()
+                    prediction.index = validation_series.index
+                    metrics = calculate_forecast_metrics(validation_series, prediction)
+
+                    row.update(
+                        {
+                            "MAE": metrics["MAE"],
+                            "RMSE": metrics["RMSE"],
+                            "WAPE": metrics["WAPE"],
+                            "MAPE": metrics["MAPE"],
+                            "AIC": getattr(fitted, "aic", np.nan),
+                            "BIC": getattr(fitted, "bic", np.nan),
+                            "converged": bool(
+                                getattr(getattr(fitted, "mle_retvals", {}), "get", lambda k, d: d)("converged", True)
+                            ),
+                            "status": "success",
+                        }
+                    )
+                except (ValueError, np.linalg.LinAlgError) as exc:
+                    row["status"] = f"error: {type(exc).__name__}"
+                except Exception as exc:
+                    row["status"] = f"error: {type(exc).__name__}"
+                rows.append(row)
+
+    results = pd.DataFrame(rows)
+    success_rows = results[results["status"] == "success"].copy()
+    if success_rows.empty:
+        raise ValueError("SARIMA parameter tuning failed for all candidate configurations.")
+
+    best = success_rows.sort_values(["WAPE", "MAE"], ascending=True).iloc[0]
+    best_config = {
+        "order": tuple(best["order"]),
+        "seasonal_order": tuple(best["seasonal_order"]),
+        "trend": best["trend"],
+        "MAE": float(best["MAE"]),
+        "RMSE": float(best["RMSE"]),
+        "WAPE": float(best["WAPE"]),
+        "MAPE": float(best["MAPE"]),
+        "AIC": float(best["AIC"]),
+        "BIC": float(best["BIC"]),
+        "converged": bool(best["converged"]),
+        "status": best["status"],
+    }
+    return best_config, results
+
+
+def rolling_time_series_validation(
+    series: pd.Series,
+    validation_days: int = 30,
+    max_folds: int = 3,
+    order: Tuple[int, int, int] = (1, 1, 1),
+    seasonal_order: Tuple[int, int, int, int] = (1, 0, 1, 7),
+    trend: Optional[str] = "c",
+    maxiter: int = 1000,
+    suppress_warnings: bool = True,
+) -> Tuple[pd.DataFrame, Dict[str, float]]:
+    """Run an expanding-window time-series validation using SARIMA on multiple folds."""
+    series = series.copy().astype(float)
+    if series.index.freq is None:
+        series = series.asfreq("D")
+
+    n = len(series)
+    possible_folds = max(1, (n // validation_days) - 1)
+    folds = min(max_folds, possible_folds)
+    if folds < 1:
+        raise ValueError("Not enough data for rolling validation with the requested fold configuration.")
+
+    rows: List[Dict[str, Any]] = []
+    for fold_number in range(1, folds + 1):
+        train_end = n - validation_days * (folds - fold_number + 1)
+        validation_start = train_end
+        validation_end = validation_start + validation_days
+
+        train_fold = series.iloc[:train_end]
+        validation_fold = series.iloc[validation_start:validation_end]
+        status = "success"
+
+        try:
+            with warnings.catch_warnings():
+                if suppress_warnings:
+                    warnings.simplefilter("ignore")
+                fitted = fit_sarima_model(
+                    train_fold,
+                    order=order,
+                    seasonal_order=seasonal_order,
+                    trend=trend,
+                    maxiter=maxiter,
+                )
+
+            forecast_df = generate_sarima_forecast(fitted, steps=len(validation_fold))
+            forecast_df = clip_negative_forecasts(forecast_df)
+            prediction = forecast_df["forecast"].copy()
+            prediction.index = validation_fold.index
+            metrics = calculate_forecast_metrics(validation_fold, prediction)
+        except (ValueError, np.linalg.LinAlgError) as exc:
+            metrics = {"MAE": np.nan, "RMSE": np.nan, "WAPE": np.nan, "MAPE": np.nan}
+            status = f"error: {type(exc).__name__}"
+        except Exception as exc:
+            metrics = {"MAE": np.nan, "RMSE": np.nan, "WAPE": np.nan, "MAPE": np.nan}
+            status = f"error: {type(exc).__name__}"
+
+        rows.append(
+            {
+                "fold": fold_number,
+                "train_start": series.index[0],
+                "train_end": series.index[train_end - 1],
+                "validation_start": validation_fold.index[0],
+                "validation_end": validation_fold.index[-1],
+                "MAE": metrics["MAE"],
+                "RMSE": metrics["RMSE"],
+                "WAPE": metrics["WAPE"],
+                "MAPE": metrics["MAPE"],
+                "status": status,
+            }
+        )
+
+    results = pd.DataFrame(rows)
+    valid = results[results["status"] == "success"]
+    average_metrics = {
+        "MAE_mean": float(valid["MAE"].mean()) if not valid.empty else np.nan,
+        "RMSE_mean": float(valid["RMSE"].mean()) if not valid.empty else np.nan,
+        "WAPE_mean": float(valid["WAPE"].mean()) if not valid.empty else np.nan,
+        "MAPE_mean": float(valid["MAPE"].mean()) if not valid.empty else np.nan,
+        "WAPE_std": float(valid["WAPE"].std(ddof=0)) if len(valid) > 1 else 0.0,
+    }
+    return results, average_metrics
 
 
 def calculate_forecast_metrics(actual: pd.Series, prediction: pd.Series) -> Dict[str, float]:
