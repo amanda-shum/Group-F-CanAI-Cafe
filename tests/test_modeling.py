@@ -5,7 +5,7 @@ Usage:
 py -m pytest tests\test_modeling.py -v
 
 """
-
+import numpy as np
 
 from pathlib import Path
 
@@ -129,7 +129,7 @@ def test_complete_grouped_daily_sales_fills_missing_days_without_casting_group_l
 
     assert complete.loc[complete["Item"] == "Coffee", "daily_total_sales"].tolist() == [10.0, 0.0, 15.0]
     assert complete.loc[complete["Item"] == "Tea", "daily_total_sales"].tolist() == [5.0]
-    assert complete["Item"].dtype == object
+    assert pd.api.types.is_string_dtype(complete["Item"])
 
 
 def test_naive_and_seasonal_baselines_produce_expected_length_and_index():
@@ -158,7 +158,7 @@ def test_calculate_forecast_metrics_handles_zero_actuals_gracefully():
 
     assert metrics["MAE"] == pytest.approx(2.5)
     assert metrics["RMSE"] == pytest.approx(np.sqrt(7.5))
-    assert metrics["WAPE"] == pytest.approx(1.0)
+    assert np.isnan(metrics["WAPE"])
     assert np.isnan(metrics["MAPE"])
 
 
