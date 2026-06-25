@@ -98,7 +98,7 @@ def validation_comparison_to_dataframe(metrics_by_model: dict[str, dict[str, flo
         )
     return pd.DataFrame(rows)
 
-
+#directory paths for data and outputs
 PROJECT_ROOT = Path(__file__).resolve().parent  # root of the project directory
 DATA_PATH = PROJECT_ROOT / "data" / "CanAI Cafe 2023 Sales Information.xlsx"  # source dataset path
 OUTPUT_DIR = PROJECT_ROOT / "reports"  # output directory for forecast results
