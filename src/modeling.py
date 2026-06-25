@@ -142,9 +142,11 @@ def complete_grouped_daily_sales(
         group = group.set_index(date_col).sort_index()
         full_index = pd.date_range(start=group.index.min(), end=group.index.max(), freq="D")
 
-        # Reindex the group to include every date in the range, filling absent days with zero sales.
-        group = group.reindex(full_index, fill_value=0.0)
+        # Reindex the group to include every date in the range. Fill only the sales
+        # column after reindexing so string-type group labels are not coerced.
+        group = group.reindex(full_index)
         group = group.reset_index().rename(columns={"index": date_col})
+        group[sales_col] = group[sales_col].fillna(0.0)
 
         # Restore group identity values after the reindex operation.
         if isinstance(key_values, tuple):

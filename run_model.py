@@ -275,6 +275,72 @@ def save_grouped_csvs(raw_transactions: pd.DataFrame) -> None:
     print(f"- {item_output}", flush=True)
 
 
+def display_province_sales_summary(raw_transactions: pd.DataFrame, top_n: int = 10) -> None:
+    """
+    Show a terminal summary of total sales by province.
+
+    Parameters:
+        raw_transactions: Cleaned raw transaction DataFrame.
+        top_n: Number of top provinces to show.
+    """
+    province_daily = aggregate_daily_sales_by_group(
+        raw_transactions,
+        group_cols=["Province"],
+        date_col="Transaction Date",
+        sales_col="Total Spent",
+    )
+    totals = (
+        province_daily.groupby("Province", as_index=False)["daily_total_sales"]
+        .sum()
+        .rename(columns={"daily_total_sales": "total_sales"})
+        .sort_values("total_sales", ascending=False)
+    )
+
+    print("\nPROVINCE SALES SUMMARY", flush=True)
+    if totals.empty:
+        print("No province-level sales data is available.", flush=True)
+        return
+
+    print(totals.head(top_n).to_string(index=False), flush=True)
+    print(
+        f"\nDisplayed top {min(top_n, len(totals))} provinces by total sales.",
+        flush=True,
+    )
+
+
+def display_item_sales_summary(raw_transactions: pd.DataFrame, top_n: int = 10) -> None:
+    """
+    Show a terminal summary of total sales by item.
+
+    Parameters:
+        raw_transactions: Cleaned raw transaction DataFrame.
+        top_n: Number of top items to show.
+    """
+    item_daily = aggregate_daily_sales_by_group(
+        raw_transactions,
+        group_cols=["Item"],
+        date_col="Transaction Date",
+        sales_col="Total Spent",
+    )
+    totals = (
+        item_daily.groupby("Item", as_index=False)["daily_total_sales"]
+        .sum()
+        .rename(columns={"daily_total_sales": "total_sales"})
+        .sort_values("total_sales", ascending=False)
+    )
+
+    print("\nITEM SALES SUMMARY", flush=True)
+    if totals.empty:
+        print("No item-level sales data is available.", flush=True)
+        return
+
+    print(totals.head(top_n).to_string(index=False), flush=True)
+    print(
+        f"\nDisplayed top {min(top_n, len(totals))} items by total sales.",
+        flush=True,
+    )
+
+
 def train_pipeline() -> None:
     """
     Run the training workflow: train SARIMA on the train split and evaluate on validation.
@@ -423,6 +489,14 @@ def train_pipeline() -> None:
     monthly = aggregate_forecast_to_monthly(forecast)
     final = build_forecast_output(forecast)
 
+    print("\nValidation monthly forecast:", flush=True)
+    print(monthly, flush=True)
+
+    raw_transactions = load_raw_transactions()
+    display_province_sales_summary(raw_transactions)
+    display_item_sales_summary(raw_transactions)
+
+    print("\nResults are ready. You can choose whether to save the outputs.", flush=True)
     if prompt_save_results():
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         daily_output_path = OUTPUT_DIR / "validation_forecast.csv"
@@ -443,11 +517,12 @@ def train_pipeline() -> None:
         print(f"- {monthly_output_path}", flush=True)
         print(f"- {metrics_output_path}", flush=True)
         print(f"- {comparison_output_path}", flush=True)
+
+        if prompt_save_grouped_data():
+            raw_transactions = load_raw_transactions()
+            save_grouped_csvs(raw_transactions)
     else:
         print("\nSkipping CSV save. No files were written.", flush=True)
-
-    print("\nValidation monthly forecast:", flush=True)
-    print(monthly, flush=True)
 
     # Keep the indexed series alive in case additional analysis is added later.
     _ = daily_indexed
@@ -522,6 +597,14 @@ def test_pipeline() -> None:
     monthly = aggregate_forecast_to_monthly(test_forecast)
     final = build_forecast_output(test_forecast)
 
+    print("\nMonthly forecast:", flush=True)
+    print(monthly, flush=True)
+
+    raw_transactions = load_raw_transactions()
+    display_province_sales_summary(raw_transactions)
+    display_item_sales_summary(raw_transactions)
+
+    print("\nResults are ready. You can choose whether to save the outputs.", flush=True)
     if prompt_save_results():
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         daily_output_path = OUTPUT_DIR / "daily_forecast.csv"
@@ -542,11 +625,12 @@ def test_pipeline() -> None:
         print(f"- {metrics_output_path}", flush=True)
         print(f"- {six_month_output_path}", flush=True)
         print(f"- {a_output_path}", flush=True)
+
+        if prompt_save_grouped_data():
+            raw_transactions = load_raw_transactions()
+            save_grouped_csvs(raw_transactions)
     else:
         print("\nSkipping CSV save. No files were written.", flush=True)
-
-    print("\nMonthly forecast:", flush=True)
-    print(monthly, flush=True)
 
     _ = train_validation
 

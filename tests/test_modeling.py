@@ -14,6 +14,7 @@ import pytest
 
 from src.modeling import (
     calculate_forecast_metrics,
+    complete_grouped_daily_sales,
     ensure_daily_index,
     extract_daily_sales_series,
     naive_forecast,
@@ -113,6 +114,22 @@ def test_extract_daily_sales_series_raises_on_missing_sales_column():
 
     with pytest.raises(KeyError, match="Expected sales column"):
         extract_daily_sales_series(df, sales_col="daily_total_sales", date_col="date")
+
+
+def test_complete_grouped_daily_sales_fills_missing_days_without_casting_group_labels():
+    grouped = pd.DataFrame(
+        {
+            "Item": ["Coffee", "Coffee", "Tea"],
+            "date": pd.to_datetime(["2024-01-01", "2024-01-03", "2024-01-01"]),
+            "daily_total_sales": [10.0, 15.0, 5.0],
+        }
+    )
+
+    complete = complete_grouped_daily_sales(grouped, ["Item"], date_col="date")
+
+    assert complete.loc[complete["Item"] == "Coffee", "daily_total_sales"].tolist() == [10.0, 0.0, 15.0]
+    assert complete.loc[complete["Item"] == "Tea", "daily_total_sales"].tolist() == [5.0]
+    assert complete["Item"].dtype == object
 
 
 def test_naive_and_seasonal_baselines_produce_expected_length_and_index():
