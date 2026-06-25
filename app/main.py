@@ -138,9 +138,9 @@ def apply_theme(colors):
     .section-heading {{ margin:.2rem 0 .65rem; }}
     .section-title {{ font-size:1.06rem; font-weight:760; margin-bottom:.22rem; }}
     .note {{ color:{colors["primary_text"]}; opacity:.68; font-size:.86rem; margin-bottom:.45rem; }}
-    .kpi {{ border:1px solid {colors["card_border"]}; border-radius:8px; padding:.72rem .78rem; background:{colors["card_background"]}; min-height:7.2rem; }}
-    .kpi-label {{ color:{colors["primary_text"]}; opacity:.68; font-size:.72rem; font-weight:750; text-transform:uppercase; letter-spacing:.04em; }}
-    .kpi-value {{ font-size:clamp(1.05rem, 1.4vw, 1.34rem); font-weight:820; line-height:1.12; margin-top:.18rem; overflow-wrap:anywhere; }}
+    .kpi {{ border:1px solid {colors["card_border"]}; border-radius:8px; padding:.5rem .5rem; background:{colors["card_background"]}; min-height:5.2rem; }}
+    .kpi-label {{ color:{colors["primary_text"]}; opacity:.68; font-size:.72rem; font-weight:750; text-transform:uppercase; letter-spacing:.04em; white-space:nowrap; }}
+    .kpi-value {{ font-size:clamp(.82rem, 1vw, 1.08rem); font-weight:820; line-height:1.12; margin-top:.18rem; overflow-wrap:anywhere; }}
     .placeholder {{ border:1px dashed {colors["card_border"]}; border-radius:8px; background:{colors["page_background"]}; padding:.75rem .85rem; margin:.45rem 0; font-size:.96rem; }}
     </style>
     """, unsafe_allow_html=True)
@@ -241,7 +241,7 @@ def main():
 
     metrics, monthly, forecast, weekday, province, products, location, activity = prepared
     if page == "Overview":
-        render_overview(metrics, monthly, province, location)
+        render_overview(metrics, monthly, province, products, location, weekday)
     elif page == "Sales":
         render_sales(monthly, weekday, province, products, location, activity)
     elif page == "Forecast":

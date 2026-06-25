@@ -77,7 +77,7 @@ def bar_option(df, label_col, value_col="total_spent", horizontal=True):
         })
     else:
         opt.update({
-            "xAxis": {"type": "category", "data": labels, "axisLabel": {"color": COLORS["secondary_text"]}},
+            "xAxis": {"type": "category", "data": labels, "axisLabel": {"color": COLORS["secondary_text"], "interval":0, "rotate":25}},
             "yAxis": {"type": "value", "axisLabel": {"formatter": "${value}", "color": COLORS["secondary_text"]}, "splitLine": {"lineStyle": {"color": COLORS["chart_grid"]}}},
             "series": [{"type": "bar", "data": values, "barWidth": "55%", "itemStyle": {"borderRadius": [6, 6, 0, 0]}}],
         })
