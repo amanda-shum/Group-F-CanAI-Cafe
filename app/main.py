@@ -95,7 +95,7 @@ DARK_COLORS = {
 def apply_theme(colors):
     st.markdown(f"""
     <style>
-    header[data-testid="stHeader"], [data-testid="stToolbar"] {{ display:none; }}
+    [data-testid="stSidebarCollapsedControl"] {{display: felx !important; visibility: visible}}
     .stApp {{ background:{colors["page_background"]}; color:{colors["primary_text"]}; }}
     .block-container {{ max-width:1420px; padding-top:1.4rem; padding-bottom:2.5rem; }}
     [data-testid="stVerticalBlock"] {{ gap:1.35rem; }}
@@ -220,7 +220,7 @@ def prepare_dashboard_data(data):
 
 
 def main():
-    st.set_page_config(page_title=PAGE_TITLE, page_icon="B", layout="wide")
+    st.set_page_config(page_title=PAGE_TITLE, page_icon="B", layout="wide", initial_sidebar_state="expanded")
     colors = DARK_COLORS if st.context.theme.get("type") == "dark" else LIGHT_COLORS
     charts.set_colors(colors)
     apply_theme(colors)
@@ -249,6 +249,6 @@ def main():
     else:
         render_insights(df, data, file)
 
-
+ 
 if __name__ == "__main__":
     main()
