@@ -1,3 +1,23 @@
+"""
+CanAI Cafe dashboard!!.
+
+This file is the main entry point for the dashboard web app. 
+It:
+- configures the Streamlit page and theme
+- loads the cleaned cafe sales dataset
+- applies sidebar filters (province and month)
+- prepares aggregated data for dashboard views
+- renders the Overview, Sales, Forecast, and Insights sections
+
+The app depends on helper modules such as:
+- charts.py for visual components and forecasting helpers
+- data.py for loading the dataset
+- sections.py for rendering dashboard pages
+
+Run with:
+    streamlit run app/main.py
+"""
+
 import pandas as pd
 import streamlit as st
 
