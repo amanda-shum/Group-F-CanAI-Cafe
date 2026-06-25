@@ -47,7 +47,7 @@ LIGHT_COLORS = {
     "chart_soft": "#A7B99E",
     "chart_deep": "#3E2B20",
     "heatmap_low": "#FBF7EF",
-    "sidebar_background": "#26262E",
+    "sidebar_background": "#332211",
     "sidebar_border": "#34343D",
     "sidebar_text": "#ECE8E2",
     "sidebar_muted_text": "#AAA8B0",
@@ -56,8 +56,8 @@ LIGHT_COLORS = {
     "sidebar_brand_text": "#FFFFFF",
     "sidebar_brand_subtitle": "#8E8D96",
     "sidebar_active_background": "#3A302D",
-    "sidebar_active_text": "#F0A13A",
-    "sidebar_input_background": "#34343D",
+    "sidebar_active_text": "#FFFDD0",
+    "sidebar_input_background": "#332211",
     "sidebar_input_border": "#555560",
     "soft_shadow": "rgba(0,0,0,.04)",
 }
@@ -76,17 +76,17 @@ DARK_COLORS = {
     "chart_soft": "#71896C",
     "chart_deep": "#F0D9B5",
     "heatmap_low": "#2A261F",
-    "sidebar_background": "#26262E",
-    "sidebar_border": "#34343D",
+    "sidebar_background": "#332211",
+    "sidebar_border": "#332211",
     "sidebar_text": "#ECE8E2",
     "sidebar_muted_text": "#AAA8B0",
     "sidebar_quiet_text": "#6F6E78",
-    "sidebar_brand_background": "#D98C32",
+    "sidebar_brand_background": "#FFFDD0",
     "sidebar_brand_text": "#FFFFFF",
     "sidebar_brand_subtitle": "#8E8D96",
     "sidebar_active_background": "#3A302D",
-    "sidebar_active_text": "#F0A13A",
-    "sidebar_input_background": "#34343D",
+    "sidebar_active_text": "#FFFDD0",
+    "sidebar_input_background": "#332211",
     "sidebar_input_border": "#555560",
     "soft_shadow": "rgba(0,0,0,.18)",
 }
@@ -95,6 +95,7 @@ DARK_COLORS = {
 def apply_theme(colors):
     st.markdown(f"""
     <style>
+    header[data-testid="stHeader"] {{ background: {colors["sidebar_background"]}; }}
     [data-testid="stSidebarCollapsedControl"] {{display: felx !important; visibility: visible}}
     .stApp {{ background:{colors["page_background"]}; color:{colors["primary_text"]}; }}
     .block-container {{ max-width:1420px; padding-top:1.4rem; padding-bottom:2.5rem; }}
@@ -102,6 +103,7 @@ def apply_theme(colors):
     [data-testid="stHorizontalBlock"] {{ gap:1.35rem; }}
     [data-testid="stVerticalBlockBorderWrapper"] {{ margin-top:.25rem; }}
     div[data-testid="stVerticalBlockBorderWrapper"] {{
+        
         background:{colors["card_background"]};
         border-color:{colors["card_border"]};
         box-shadow:0 10px 24px {colors["soft_shadow"]};
