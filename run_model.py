@@ -35,7 +35,14 @@ from src.modeling import (
     split_time_series,
     tune_sarima_parameters,
 )
-from src.sales_insights import calculate_sales_insights, insights_to_dataframe, print_sales_insights, prompt_save_insights
+from src.sales_insights import (
+    calculate_sales_insights,
+    get_available_date_range,
+    insights_to_dataframe,
+    print_sales_insights,
+    prompt_for_period,
+    prompt_save_insights,
+)
 
 
 def format_metric_value(metric: str, value: float) -> str:
@@ -510,21 +517,34 @@ def train_pipeline() -> None:
     display_province_sales_summary(raw_transactions)
     display_item_sales_summary(raw_transactions)
 
+    # Prompt user for the month to analyze in sales insights.
+    daily_series = daily_input.set_index("date")["daily_total_sales"]
+    period_start, period_end = prompt_for_period(daily_series)
+
     insights = calculate_sales_insights(
-        daily_input.set_index("date")["daily_total_sales"],
+        daily_series,
         actual_values=actual,
         forecast_values=sarima_pred,
         wape=sarima_metrics.get("WAPE"),
+        period_start=period_start,
+        period_end=period_end,
     )
     print_sales_insights(insights)
 
     if prompt_save_insights():
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         insights_path = OUTPUT_DIR / "sales_insights.csv"
-        insights_to_dataframe(insights).to_csv(insights_path, index=False)
-        print(f"\nSales insights saved to: {insights_path}", flush=True)
-    else:
-        print("\nSkipping sales insights save.", flush=True)
+        try:
+            insights_to_dataframe(insights).to_csv(insights_path, index=False)
+            print(f"\nSales insights saved to: {insights_path}", flush=True)
+        except PermissionError:
+            print(
+                f"\nError: Cannot save to {insights_path} (file is locked). "
+                f"Please close the file if it's open in another application and try again.",
+                flush=True,
+            )
+        except Exception as e:
+            print(f"\nError saving insights: {e}", flush=True)
 
     print("\nResults are ready. You can choose whether to save the outputs.", flush=True)
     if prompt_save_results():
@@ -634,21 +654,34 @@ def test_pipeline() -> None:
     display_province_sales_summary(raw_transactions)
     display_item_sales_summary(raw_transactions)
 
+    # Prompt user for the month to analyze in sales insights.
+    daily_series = daily_input.set_index("date")["daily_total_sales"]
+    period_start, period_end = prompt_for_period(daily_series)
+
     insights = calculate_sales_insights(
-        daily_input.set_index("date")["daily_total_sales"],
+        daily_series,
         actual_values=test_actual,
         forecast_values=test_prediction,
         wape=test_metrics.get("WAPE"),
+        period_start=period_start,
+        period_end=period_end,
     )
     print_sales_insights(insights)
 
     if prompt_save_insights():
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         insights_path = OUTPUT_DIR / "sales_insights.csv"
-        insights_to_dataframe(insights).to_csv(insights_path, index=False)
-        print(f"\nSales insights saved to: {insights_path}", flush=True)
-    else:
-        print("\nSkipping sales insights save.", flush=True)
+        try:
+            insights_to_dataframe(insights).to_csv(insights_path, index=False)
+            print(f"\nSales insights saved to: {insights_path}", flush=True)
+        except PermissionError:
+            print(
+                f"\nError: Cannot save to {insights_path} (file is locked). "
+                f"Please close the file if it's open in another application and try again.",
+                flush=True,
+            )
+        except Exception as e:
+            print(f"\nError saving insights: {e}", flush=True)
 
     print("\nResults are ready. You can choose whether to save the outputs.", flush=True)
     if prompt_save_results():
