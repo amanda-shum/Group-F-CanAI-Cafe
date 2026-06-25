@@ -1,4 +1,8 @@
 import streamlit as st
+
+
+
+
 from src.modeling import (
     fit_sarima_model,
     generate_sarima_forecast,
@@ -8,7 +12,7 @@ from src.modeling import (
 from run_model import load_daily_sales
 
 
-def run():
+def render_interactive_forecast():
     st.title("Interactive Forecasting Tool")
 
     # Sidebar controls

@@ -20,16 +20,21 @@ Run with:
 
 import pandas as pd
 import streamlit as st
-
+from pathlib import Path
+import sys
 import charts
 from charts import build_average_forecast
 from data import load_data
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 from sections import (
     ITEM_BADGES,
     render_forecast,
     render_insights,
     render_overview,
     render_sales,
+    render_interactive_forecast
 )
 
 PAGE_TITLE = "CanAI Cafe Dashboard!"
@@ -165,7 +170,7 @@ def sidebar_controls(df):
             unsafe_allow_html=True,
         )
         st.divider()
-        labels = {"Overview": "Overview", "Sales": "Sales", "Forecast": "Forecast", "Insights": "Insights"}
+        labels = {"Overview": "Overview", "Sales": "Sales", "Forecast": "Forecast", "Insights": "Insights", "Interactive Forecast": "Interative Forecast"}
         page = st.radio("Menu", list(labels), format_func=lambda option: labels[option], label_visibility="collapsed")
         st.divider()
         st.markdown('<div class="sidebar-label">FILTERS</div>', unsafe_allow_html=True)
@@ -246,6 +251,8 @@ def main():
         render_sales(monthly, weekday, province, products, location, activity)
     elif page == "Forecast":
         render_forecast(monthly, forecast)
+    elif page == "Interactive Forecast":
+        render_interactive_forecast()
     else:
         render_insights(df, data, file)
 
