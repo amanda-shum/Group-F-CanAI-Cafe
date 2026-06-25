@@ -269,9 +269,17 @@ def generate_sarima_forecast(
         }
     )
 
-    # Assign the forecast horizon as the next consecutive daily dates.
+    # Assign the forecast horizon using the model's original row labels.
+    # `model.data.endog` can be a numpy array, so use row_labels or orig_endog index.
+    if hasattr(model.data, "row_labels") and model.data.row_labels is not None:
+        last_date = model.data.row_labels[-1]
+    elif hasattr(model.data, "orig_endog") and hasattr(model.data.orig_endog, "index"):
+        last_date = model.data.orig_endog.index[-1]
+    else:
+        raise ValueError("Unable to infer the forecast start date from the model data.")
+
     forecast_df.index = pd.date_range(
-        start=model.data.endog.index[-1] + pd.Timedelta(days=1), periods=steps, freq="D"
+        start=last_date + pd.Timedelta(days=1), periods=steps, freq="D"
     )
     return forecast_df
 
@@ -384,6 +392,11 @@ def build_forecast_output(forecast_df: pd.DataFrame) -> pd.DataFrame:
         labels=["low", "medium", "high"],
     )
 
-    # Ensure all rows have a risk label, defaulting medium if needed.
-    output["risk_level"] = output["risk_level"].cat.add_categories(["medium", "high"]).fillna("medium")
+    # Ensure all rows have a risk label, defaulting to medium if missing.
+    risk_level = output["risk_level"]
+    desired_categories = ["low", "medium", "high"]
+    missing_categories = [c for c in desired_categories if c not in risk_level.cat.categories]
+    if missing_categories:
+        risk_level = risk_level.cat.add_categories(missing_categories)
+    output["risk_level"] = risk_level.fillna("medium")
     return output

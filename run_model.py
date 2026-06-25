@@ -1,12 +1,18 @@
 """
 Usage:
-    py run_model.py
+    py run_model.py train
+    py run_model.py test
+
+Commands:
+    train - load data, train SARIMA, evaluate on validation, and optionally save validation forecasts.
+    test  - retrain on train+validation, evaluate on test data, generate a 6-month forecast, and optionally save outputs.
 
 This script loads daily sales from the Excel file, trains a SARIMA forecasting pipeline,
 validates performance, evaluates on a held-out test set, and optionally saves results
 including a 6-month forecast.
 """
 
+import argparse
 from pathlib import Path
 
 import pandas as pd
@@ -102,45 +108,29 @@ def load_daily_sales() -> pd.DataFrame:
     return daily
 
 
-def create_forecast_with_fallback(model, steps: int) -> pd.DataFrame:
+def prompt_save_results() -> bool:
     """
-    This function generates a daily forecast, using a fallback when the primary helper fails.
+    Prompt the user to confirm whether results should be saved to CSV.
 
     Parameters:
-        model: A fitted SARIMA or forecast-capable model instance.
-        steps: Number of future days to forecast.
+        None
 
     Returns:
-        pd.DataFrame: Forecast output with point and interval columns.
+        bool: True when the user confirms saving.
     """
-    try:
-        return generate_sarima_forecast(model, steps=steps)  # use main forecast helper
-    except (AttributeError, TypeError):
-        # Fallback path for models lacking the same forecast interface.
-        prediction = model.get_forecast(steps=steps)
-        intervals = prediction.conf_int(alpha=0.05)
-
-        last_date = pd.Timestamp(model.data.dates[-1])  # final observed date in model data
-
-        forecast = pd.DataFrame(
-            {
-                "forecast": prediction.predicted_mean.to_numpy(),
-                "lower_bound": intervals.iloc[:, 0].to_numpy(),
-                "upper_bound": intervals.iloc[:, 1].to_numpy(),
-            },
-            index=pd.date_range(
-                start=last_date + pd.Timedelta(days=1),
-                periods=steps,
-                freq="D",
-            ),
-        )
-
-        return forecast
+    while True:
+        # Ask the user to choose whether results should be written to CSV.
+        save_answer = input(
+            "Save results to CSV files? Enter 'y' to save or 'n' to skip: "
+        ).strip().lower()
+        if save_answer in {"y", "n"}:
+            return save_answer == "y"
+        print("Please enter 'y' or 'n'.")
 
 
-def main() -> None:
+def train_pipeline() -> None:
     """
-    This function runs the complete baseline and SARIMA forecasting workflow.
+    Run the training workflow: train SARIMA on the train split and evaluate on validation.
 
     Parameters:
         None
@@ -149,25 +139,23 @@ def main() -> None:
         None
     """
     print("Loading and preparing sales data...", flush=True)
-    daily_input = load_daily_sales()  # load cleaned daily sales and preserve original raw data
+    daily_input = load_daily_sales()
 
+    # Extract the ordered time series used by the model.
     series = extract_daily_sales_series(
         daily_input,
         sales_col="daily_total_sales",
         date_col="date",
     )  # get the daily sales series for modeling
 
-    # Confirm the daily series is properly indexed and ready for modeling.
+    # Ensure the dataset has a consistent daily DateTimeIndex for any downstream output.
     daily_indexed = ensure_daily_index(daily_input, date_col="date")
 
     print(f"Daily series length: {len(series)}", flush=True)
     print(series.head(), flush=True)
 
-    # Build calendar features for diagnostic inspection and potential exogenous model use.
-    calendar = build_calendar_features(daily_input, date_col="date")
-    print("\nCalendar feature sample:", flush=True)
-    print(calendar.head(), flush=True)
-
+    # Split the data into train / validation / test partitions before training.
+    # We leave the final test window untouched until test mode is run.
     train, validation, test = split_time_series(
         daily_input,
         validation_days=30,
@@ -181,11 +169,12 @@ def main() -> None:
         flush=True,
     )
 
-    naive = naive_forecast(train["daily_total_sales"], forecast_steps=30)  # baseline last-value forecast
+    # Build simple baseline forecasts for comparison.
+    naive = naive_forecast(train["daily_total_sales"], forecast_steps=30)
     seasonal = seasonal_naive_forecast(
         train["daily_total_sales"],
         forecast_steps=30,
-    )  # baseline seasonal forecast using last-week values
+    )
 
     print("\nNaive forecast sample:", naive.head().tolist(), flush=True)
     print(
@@ -195,19 +184,18 @@ def main() -> None:
     )
 
     print("\nTraining SARIMA model. This may take a moment...", flush=True)
-    fitted_model = fit_sarima_model(train["daily_total_sales"])  # train SARIMA on the training partition
+    fitted_model = fit_sarima_model(train["daily_total_sales"])
 
-    # Generate the forecast and enforce nonnegative sales values.
-    forecast = create_forecast_with_fallback(fitted_model, steps=30)
+    # Forecast only the validation horizon to evaluate the model's generalization.
+    forecast = generate_sarima_forecast(fitted_model, steps=len(validation))
     forecast = clip_negative_forecasts(forecast)
 
-    print("\nSARIMA forecast sample:", flush=True)
+    print("\nValidation forecast sample:", flush=True)
     print(forecast.head(), flush=True)
 
-    actual = validation["daily_total_sales"].iloc[: len(forecast)]  # validate against the most recent validation window
-    prediction = forecast["forecast"].iloc[: len(actual)].copy()  # align forecast length for comparison
-
-    # Match the prediction index to the validation index for metric calculation.
+    # Align forecast predictions with the validation dates for evaluation.
+    actual = validation["daily_total_sales"].copy()
+    prediction = forecast["forecast"].copy()
     prediction.index = actual.index
 
     metrics = calculate_forecast_metrics(actual, prediction)
@@ -216,33 +204,93 @@ def main() -> None:
     for name, value in metrics.items():
         print(f"{name}: {value:.4f}", flush=True)
 
-    # Final test-set evaluation should only occur after validation is complete.
-    print("\nEvaluating SARIMA on the final test set...", flush=True)
+    # Aggregate the daily validation forecast to monthly totals for higher-level reporting.
+    monthly = aggregate_forecast_to_monthly(forecast)
+    final = build_forecast_output(forecast)
 
-    train_validation = pd.concat([train, validation]).sort_index()  # use all available pre-test data
+    if prompt_save_results():
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        daily_output_path = OUTPUT_DIR / "validation_forecast.csv"
+        monthly_output_path = OUTPUT_DIR / "validation_monthly_forecast.csv"
+        metrics_output_path = OUTPUT_DIR / "validation_metrics.csv"
+        a_output_path = PROJECT_ROOT / "a.csv"
+
+        final.to_csv(daily_output_path, index_label="date")
+        monthly.to_csv(monthly_output_path, index_label="month")
+        pd.DataFrame([metrics]).to_csv(metrics_output_path, index=False)
+        final.to_csv(a_output_path, index_label="date")
+
+        print("\nSaved outputs:", flush=True)
+        print(f"- {daily_output_path}", flush=True)
+        print(f"- {monthly_output_path}", flush=True)
+        print(f"- {metrics_output_path}", flush=True)
+        print(f"- {a_output_path}", flush=True)
+    else:
+        print("\nSkipping CSV save. No files were written.", flush=True)
+
+    print("\nValidation monthly forecast:", flush=True)
+    print(monthly, flush=True)
+
+    # Keep the indexed series alive in case additional analysis is added later.
+    _ = daily_indexed
+
+
+def test_pipeline() -> None:
+    """
+    Run the final test workflow: retrain on train+validation and evaluate on the test split.
+
+    Parameters:
+        None
+
+    Returns:
+        None
+    """
+    print("Loading and preparing sales data...", flush=True)
+    daily_input = load_daily_sales()
+
+    # split into train, validation, and test partitions
+    train, validation, test = split_time_series(
+        daily_input,
+        validation_days=30,
+        test_days=30,
+        date_col="date",
+    ) 
+
+    print(
+        f"\nTrain/validation/test sizes: "
+        f"{len(train)}/{len(validation)}/{len(test)}",
+        flush=True,
+    )
+
+    print("\nRetraining SARIMA on train + validation for final test evaluation...", flush=True)
+    
+    # Retrain the final model on both train and validation data before test scoring.
+    train_validation = pd.concat([train, validation]).sort_index()
     test_model = fit_sarima_model(train_validation["daily_total_sales"])
 
-    test_forecast = create_forecast_with_fallback(test_model, steps=len(test))
-    test_forecast = clip_negative_forecasts(test_forecast)  # ensure no negative predictions
+    test_forecast = generate_sarima_forecast(test_model, steps=len(test))
+    test_forecast = clip_negative_forecasts(test_forecast)
 
     test_actual = test["daily_total_sales"].copy()
     test_prediction = test_forecast["forecast"].copy()
-    test_prediction.index = test_actual.index  # align the test forecast to actual dates
+    test_prediction.index = test_actual.index
 
     test_metrics = calculate_forecast_metrics(test_actual, test_prediction)
 
     print("\nFinal test metrics:", flush=True)
     for name, value in test_metrics.items():
         print(f"{name}: {value:.4f}", flush=True)
-    # Generate an extended 6-month forecast from the final train+validation model.
+
     print("\nGenerating a 6-month forecast from the final model...", flush=True)
-    six_month_steps = 182  # approximately six months of daily forecasts
-    six_month_forecast = create_forecast_with_fallback(test_model, steps=six_month_steps)
+    
+    # Generate a longer horizon forecast for roughly 6 months of daily estimates.
+    six_month_steps = 182
+    six_month_forecast = generate_sarima_forecast(test_model, steps=six_month_steps)
     six_month_forecast = clip_negative_forecasts(six_month_forecast)
+
     print("6-month forecast sample:", flush=True)
     print(six_month_forecast.head(), flush=True)
 
-    # Print a short summary for the extended six-month forecast.
     six_month_start = six_month_forecast.index.min()
     six_month_end = six_month_forecast.index.max()
     six_month_total = six_month_forecast["forecast"].sum()
@@ -253,47 +301,20 @@ def main() -> None:
     print(f"- Total forecast sales: ${six_month_total:,.2f}", flush=True)
     print(f"- Average daily forecast: ${six_month_average:,.2f}", flush=True)
 
-    # Combine validation and test metrics into one output row.
-    all_metrics = metrics.copy()
-    for metric_name, metric_value in test_metrics.items():
-        all_metrics[f"test_{metric_name.lower()}"] = metric_value
+    monthly = aggregate_forecast_to_monthly(test_forecast)
+    final = build_forecast_output(test_forecast)
 
-    # Use the final test forecast as the result that gets saved and reported.
-    final_forecast = test_forecast
-    monthly = aggregate_forecast_to_monthly(final_forecast)
+    if prompt_save_results():
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        daily_output_path = OUTPUT_DIR / "daily_forecast.csv"
+        monthly_output_path = OUTPUT_DIR / "monthly_forecast.csv"
+        metrics_output_path = OUTPUT_DIR / "forecast_metrics.csv"
+        six_month_output_path = OUTPUT_DIR / "six_month_forecast.csv"
+        a_output_path = PROJECT_ROOT / "a.csv"
 
-    try:
-        final = build_forecast_output(final_forecast)
-    except ValueError:
-        final = final_forecast.copy()
-        final["forecast_month"] = final.index.to_period("M").astype(str)
-        width = final["upper_bound"] - final["lower_bound"]
-        final["risk_level"] = pd.cut(
-            width,
-            bins=[-1, 0.1, 0.25, float("inf")],
-            labels=["low", "medium", "high"],
-        ).fillna("medium")
-
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    daily_output_path = OUTPUT_DIR / "daily_forecast.csv"
-    monthly_output_path = OUTPUT_DIR / "monthly_forecast.csv"
-    metrics_output_path = OUTPUT_DIR / "forecast_metrics.csv"
-    six_month_output_path = OUTPUT_DIR / "six_month_forecast.csv"
-    a_output_path = PROJECT_ROOT / "a.csv"
-
-    while True:
-        save_answer = input(
-            "Save results to CSV files? Enter 'y' to save or 'n' to skip: "
-        ).strip().lower()
-        if save_answer in {"y", "n"}:
-            break
-        print("Please enter 'y' or 'n'.")
-
-    if save_answer == "y":
         final.to_csv(daily_output_path, index_label="date")
         monthly.to_csv(monthly_output_path, index_label="month")
-        pd.DataFrame([all_metrics]).to_csv(metrics_output_path, index=False)
+        pd.DataFrame([test_metrics]).to_csv(metrics_output_path, index=False)
         six_month_forecast.to_csv(six_month_output_path, index_label="date")
         final.to_csv(a_output_path, index_label="date")
 
@@ -309,7 +330,33 @@ def main() -> None:
     print("\nMonthly forecast:", flush=True)
     print(monthly, flush=True)
 
-    _ = daily_indexed
+    _ = train_validation
+
+
+def main() -> None:
+    """
+    This function selects and runs either the training or test workflow.
+
+    Parameters:
+        None
+
+    Returns:
+        None
+    """
+    parser = argparse.ArgumentParser(
+        description="Run the SARIMA forecasting pipeline in separate train or test mode."
+    )
+    parser.add_argument(
+        "mode",
+        choices=["train", "test"],
+        help="Pipeline mode to run: 'train' evaluates on validation, 'test' evaluates on test data.",
+    )
+    args = parser.parse_args()
+
+    if args.mode == "train":
+        train_pipeline()
+    else:
+        test_pipeline()
 
 
 if __name__ == "__main__":
