@@ -1,5 +1,5 @@
-"""
-This file reads the selected sales csv/xlsx file :)"
+"""this file reads the selected sales CSV/XLSX file, checks the expected columns,
+and creates the month field used by the charts.
 """
 
 from pathlib import Path
@@ -33,7 +33,7 @@ def read_data_file(file):
 
 @st.cache_data(show_spinner=False)
 def load_data():
-    """Load the first CSV/Excel file found and prepare chart-ready typed columns."""
+    """Load the configured CSV/Excel file and prepare chart-ready columns."""
     file = DATA_FILE
     if not file.exists():
         return None, file, f"Data file not found: {file.name}. Update DATA_FILE in data.py"
@@ -44,8 +44,8 @@ def load_data():
     missing = sorted(REQUIRED_COLUMNS - set(df.columns))
     if missing:
         return None, file, (
-            f"Missing required columns after alias mapping: {', '.join(missing)}. "
-            
+            f"Missing required columns: {', '.join(missing)}. "
+            "Check the spreadsheet headers or update REQUIRED_COLUMNS in data.py."
         )
 
     df["total_spent"] = pd.to_numeric(df["total_spent"], errors="coerce")
