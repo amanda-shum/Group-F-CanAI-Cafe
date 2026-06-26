@@ -1,0 +1,15 @@
+metric,value
+Period,2023
+Total Sales ($),"6,543.00"
+Average Daily Sales ($),233.68
+Busiest Day of the Week,Tuesday
+Average Tuesday Sales ($),307.50
+Best Sales Date,"February 23, 2023"
+Best Sales Amount ($),376.00
+Worst Sales Date,"February 4, 2023"
+Worst Sales Amount ($),53.50
+Actual Period Sales ($),"6,439.00"
+Forecast Period Sales ($),"6,136.92"
+Forecast vs. Actual Difference (%),-4.69%
+Interpretation,The model under-forecasted total sales by 4.69%.
+Forecast Accuracy Based on WAPE (%),78.66%
