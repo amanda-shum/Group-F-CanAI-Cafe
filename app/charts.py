@@ -245,3 +245,171 @@ def forecast_weekday_option(forecast):
         }],
     })
     return opt
+def sales_matrix_heatmap_option(
+    df,
+    x_col,
+    y_col,
+    value_col,
+    value_name="Total Sales",
+    value_format="money",
+    x_order=None,
+    y_order=None,
+    sort_x_by_total=False,
+    sort_y_by_total=True,
+    x_sort_col=None,
+    y_sort_col=None,
+):
+    """
+    Generic sorted heatmap builder.
+
+    Sorting rules:
+    - y-axis defaults to highest total at the top.
+    - x-axis can either keep a logical order, like Jan-Dec or Mon-Sun,
+      or sort by total sales.
+    - y_sort_col is useful when the heatmap value is a percentage.
+      Example: province-item share rows all add to 100%, so we sort provinces
+      by actual province revenue instead.
+    """
+
+    if df is None or df.empty:
+        x_labels = []
+        y_labels = []
+        data = []
+        max_value = 1
+    else:
+        working = df.copy()
+        working[x_col] = working[x_col].astype(str)
+        working[y_col] = working[y_col].astype(str)
+        working[value_col] = pd.to_numeric(working[value_col], errors="coerce").fillna(0)
+
+        matrix = working.pivot_table(
+            values=value_col,
+            index=y_col,
+            columns=x_col,
+            aggfunc="sum",
+            fill_value=0,
+            observed=False,
+        )
+
+        def apply_order(existing_labels, order):
+            if order is None:
+                return existing_labels
+            order = [str(label) for label in order]
+            ordered = [label for label in order if label in existing_labels]
+            remaining = [label for label in existing_labels if label not in ordered]
+            return ordered + remaining
+
+        if x_sort_col and x_sort_col in working.columns:
+            x_labels = (
+                working.groupby(x_col)[x_sort_col]
+                .sum()
+                .sort_values(ascending=False)
+                .index
+                .tolist()
+            )
+        elif sort_x_by_total:
+            x_labels = matrix.sum(axis=0).sort_values(ascending=False).index.tolist()
+        else:
+            x_labels = working[x_col].drop_duplicates().tolist()
+            x_labels = apply_order(x_labels, x_order)
+
+        if y_sort_col and y_sort_col in working.columns:
+            y_labels = (
+                working.groupby(y_col)[y_sort_col]
+                .max()
+                .sort_values(ascending=False)
+                .index
+                .tolist()
+            )
+        elif sort_y_by_total:
+            y_labels = matrix.sum(axis=1).sort_values(ascending=False).index.tolist()
+        else:
+            y_labels = working[y_col].drop_duplicates().tolist()
+            y_labels = apply_order(y_labels, y_order)
+
+        matrix = matrix.reindex(index=y_labels, columns=x_labels, fill_value=0)
+
+        max_value = float(matrix.to_numpy().max()) if matrix.size else 1
+        max_value = max(max_value, 1)
+
+        data = []
+        for y_index, y_label in enumerate(y_labels):
+            for x_index, x_label in enumerate(x_labels):
+                value = float(matrix.loc[y_label, x_label])
+
+                if value_format == "percent":
+                    label = f"{value:.1f}%"
+                elif value_format == "money":
+                    label = f"${value:,.0f}"
+                else:
+                    label = f"{value:,.0f}"
+
+                data.append({
+                    "value": [x_index, y_index, round(value, 2)],
+                    "name": f"{y_label} / {x_label}: {label}",
+                    "label": {"formatter": label},
+                })
+
+    return {
+        "backgroundColor": "transparent",
+        "textStyle": {"fontFamily": "Arial", "color": COLORS["primary_text"]},
+        "tooltip": {
+            "trigger": "item",
+            "backgroundColor": COLORS["card_background"],
+            "borderColor": COLORS["card_border"],
+            "textStyle": {"color": COLORS["primary_text"]},
+        },
+        "grid": {
+            "left": 105,
+            "right": 20,
+            "top": 18,
+            "bottom": 52,
+            "containLabel": True,
+        },
+        "xAxis": {
+            "type": "category",
+            "data": x_labels,
+            "splitArea": {"show": True},
+            "axisLabel": {
+                "color": COLORS["secondary_text"],
+                "interval": 0,
+                "rotate": 35,
+                "fontSize": 11,
+            },
+            "axisTick": {"show": False},
+        },
+        "yAxis": {
+            "type": "category",
+            "data": y_labels,
+            "inverse": True,
+            "splitArea": {"show": True},
+            "axisLabel": {
+                "color": COLORS["secondary_text"],
+                "fontSize": 11,
+            },
+            "axisTick": {"show": False},
+        },
+        "visualMap": {
+            "show": False,
+            "min": 0,
+            "max": max_value,
+            "inRange": {
+                "color": [
+                    COLORS["heatmap_low"],
+                    COLORS["chart_soft"],
+                    COLORS["chart_primary"],
+                    COLORS["chart_deep"],
+                ]
+            },
+        },
+        "series": [{
+            "name": value_name,
+            "type": "heatmap",
+            "data": data,
+            "label": {
+                "show": True,
+                "fontSize": 10,
+                "color": COLORS["primary_text"],
+            },
+        }],
+    }
