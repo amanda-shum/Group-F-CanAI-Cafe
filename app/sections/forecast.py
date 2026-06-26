@@ -1,29 +1,31 @@
 import streamlit as st
-from streamlit_echarts import st_echarts
 
-from charts import forecast_option, money
-from sections.shared import kpi_card, section, show_chart
+from charts import forecast_option, forecast_weekday_option, future_forecast_option, money
+from sections.shared import kpi_grid, section, show_chart
+
 
 def render_forecast(monthly, forecast):
-    section("Forecast", "Actual revenue compared with placeholder forecast values.")
+    section("Forecast", "Expected sales for upcoming planning.")
     if forecast is None:
-        st.info("At least three months of sales history are needed for the forecast view.")
+        st.info("Forecast files are not available yet. Run `python run_model.py test` to generate them.")
         return
 
     with st.container(border=True):
-        section("Forecast summary", "Forecast values are placeholders until the model output is added.")
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            kpi_card("Latest month", money(forecast["latest"]), "Most recent actual")
-        with c2:
-            kpi_card("Recent average", money(forecast["recent_avg"]), "Last three months")
-        with c3:
-            kpi_card("Next month", money(forecast["next_month"]), f"{forecast['change']:+.1%} vs latest")
-        with c4:
-            kpi_card("Next quarter", money(forecast["next_quarter"]), "Three-month total")
-        show_chart(forecast_option(monthly, forecast), "forecast_vs_actual", "340px")
+        section("Forecast summary", "Simple numbers to guide the next planning cycle.")
+        kpi_grid([
+            ("Next month", money(forecast["next_month"]), "Expected sales"),
+            ("Next 3 months", money(forecast["next_quarter"]), "Expected sales"),
+            ("6-month total", money(forecast["six_month_total"]), "Forecast period"),
+        ], 3)
 
     with st.container(border=True):
-        section("Forecast notes")
-        st.write("Current method: placeholder values based on recent monthly revenue.")
-        st.write("Next step: replace placeholders with the team's forecast output.")
+        section("Actual vs forecast", "Monthly sales compared with the forecast.")
+        show_chart(forecast_option(monthly, forecast), "forecast_vs_actual", "360px")
+
+    left, right = st.columns(2)
+    with left, st.container(border=True, height=370):
+        section("Next 6 months", "Expected revenue by month.")
+        show_chart(future_forecast_option(forecast), "future_forecast", "300px")
+    with right, st.container(border=True, height=370):
+        section("Forecast by weekday", "Expected average sales for each weekday.")
+        show_chart(forecast_weekday_option(forecast), "forecast_weekday", "300px")

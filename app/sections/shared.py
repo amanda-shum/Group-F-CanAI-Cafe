@@ -5,25 +5,48 @@ from streamlit_echarts import st_echarts
 from charts import money
 
 ITEM_BADGES = {
-    "Coffee": "C",
-    "Tea": "T",
-    "Donut": "D",
-    "Sandwich": "S",
-    "Cookie": "K",
-    "Juice": "J",
-    "Refresher": "R",
-    "Salad": "G",
-    "Unknown": "?",
+    "Coffee": "☕",
+    "Tea": "🍵",
+    "Donut": "🍩",
+    "Sandwich": "🥪",
+    "Cookie": "🍪",
+    "Juice": "🧃",
+    "Refresher": "🧊",
+    "Salad": "🥗",
+    "Unknown": "•",
 }
 
+
+def product_label(item):
+    return f"{ITEM_BADGES.get(item, '•')} {item}"
+
+
+def kpi_grid(cards, columns):
+    items = []
+    for label, value, hint in cards:
+        items.append(
+            '<div class="kpi">'
+            f'<div class="kpi-label">{label}</div>'
+            f'<div class="kpi-value">{value}</div>'
+            f'<div class="note">{hint}</div>'
+            "</div>"
+        )
+    st.markdown(
+        f'<div class="kpi-grid" style="grid-template-columns:repeat({columns}, minmax(0, 1fr));">{"".join(items)}</div>',
+        unsafe_allow_html=True,
+    )
+
 def kpi_card(label, value, hint):
-    st.markdown(f"""
-    <div class="kpi">
-      <div class="kpi-label">{label}</div>
-      <div class="kpi-value">{value}</div>
-      <div class="note">{hint}</div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        (
+            '<div class="kpi">'
+            f'<div class="kpi-label">{label}</div>'
+            f'<div class="kpi-value">{value}</div>'
+            f'<div class="note">{hint}</div>'
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
 
 
 def section(title, note=None):

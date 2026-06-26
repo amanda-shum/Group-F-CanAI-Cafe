@@ -7,7 +7,7 @@ It:
 - loads the cleaned cafe sales dataset
 - applies sidebar filters (province and month)
 - prepares aggregated data for dashboard views
-- renders the Overview, Sales, Forecast, and Insights sections
+- renders the Overview, Sales, and Forecast sections
 
 The app depends on helper modules such as:
 - charts.py for visual components and forecasting helpers
@@ -24,14 +24,14 @@ from pathlib import Path
 import sys
 import charts
 from charts import build_average_forecast
-from data import load_data
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+from charts import build_forecast_summary
+from data import load_data, load_forecast_reports
 from sections import (
-    ITEM_BADGES,
+    product_label,
     render_forecast,
-    render_insights,
     render_overview,
     render_sales,
     render_interactive_forecast
@@ -52,7 +52,7 @@ LIGHT_COLORS = {
     "chart_soft": "#A7B99E",
     "chart_deep": "#3E2B20",
     "heatmap_low": "#FBF7EF",
-    "sidebar_background": "#26262E",
+    "sidebar_background": "#332211",
     "sidebar_border": "#34343D",
     "sidebar_text": "#ECE8E2",
     "sidebar_muted_text": "#AAA8B0",
@@ -61,8 +61,8 @@ LIGHT_COLORS = {
     "sidebar_brand_text": "#FFFFFF",
     "sidebar_brand_subtitle": "#8E8D96",
     "sidebar_active_background": "#3A302D",
-    "sidebar_active_text": "#F0A13A",
-    "sidebar_input_background": "#34343D",
+    "sidebar_active_text": "#FFFDD0",
+    "sidebar_input_background": "#332211",
     "sidebar_input_border": "#555560",
     "soft_shadow": "rgba(0,0,0,.04)",
 }
@@ -81,17 +81,17 @@ DARK_COLORS = {
     "chart_soft": "#71896C",
     "chart_deep": "#F0D9B5",
     "heatmap_low": "#2A261F",
-    "sidebar_background": "#26262E",
-    "sidebar_border": "#34343D",
+    "sidebar_background": "#332211",
+    "sidebar_border": "#332211",
     "sidebar_text": "#ECE8E2",
     "sidebar_muted_text": "#AAA8B0",
     "sidebar_quiet_text": "#6F6E78",
-    "sidebar_brand_background": "#D98C32",
+    "sidebar_brand_background": "#FFFDD0",
     "sidebar_brand_text": "#FFFFFF",
     "sidebar_brand_subtitle": "#8E8D96",
     "sidebar_active_background": "#3A302D",
-    "sidebar_active_text": "#F0A13A",
-    "sidebar_input_background": "#34343D",
+    "sidebar_active_text": "#FFFDD0",
+    "sidebar_input_background": "#332211",
     "sidebar_input_border": "#555560",
     "soft_shadow": "rgba(0,0,0,.18)",
 }
@@ -100,13 +100,15 @@ DARK_COLORS = {
 def apply_theme(colors):
     st.markdown(f"""
     <style>
-    [data-testid="stSidebarCollapsedControl"] {{display: felx !important; visibility: visible}}
+    header[data-testid="stHeader"] {{ background: {colors["sidebar_background"]}; }}
+    [data-testid="stSidebarCollapsedControl"] {{ display:flex !important; visibility:visible; }}
     .stApp {{ background:{colors["page_background"]}; color:{colors["primary_text"]}; }}
-    .block-container {{ max-width:1420px; padding-top:1.4rem; padding-bottom:2.5rem; }}
+    .block-container {{ max-width:1420px; padding-top:3.2rem; padding-bottom:2.5rem; }}
     [data-testid="stVerticalBlock"] {{ gap:1.35rem; }}
     [data-testid="stHorizontalBlock"] {{ gap:1.35rem; }}
     [data-testid="stVerticalBlockBorderWrapper"] {{ margin-top:.25rem; }}
     div[data-testid="stVerticalBlockBorderWrapper"] {{
+        
         background:{colors["card_background"]};
         border-color:{colors["card_border"]};
         box-shadow:0 10px 24px {colors["soft_shadow"]};
@@ -143,10 +145,32 @@ def apply_theme(colors):
     .section-heading {{ margin:.2rem 0 .65rem; }}
     .section-title {{ font-size:1.06rem; font-weight:760; margin-bottom:.22rem; }}
     .note {{ color:{colors["primary_text"]}; opacity:.68; font-size:.86rem; margin-bottom:.45rem; }}
-    .kpi {{ border:1px solid {colors["card_border"]}; border-radius:8px; padding:.72rem .78rem; background:{colors["card_background"]}; min-height:7.2rem; }}
-    .kpi-label {{ color:{colors["primary_text"]}; opacity:.68; font-size:.72rem; font-weight:750; text-transform:uppercase; letter-spacing:.04em; }}
-    .kpi-value {{ font-size:clamp(1.05rem, 1.4vw, 1.34rem); font-weight:820; line-height:1.12; margin-top:.18rem; overflow-wrap:anywhere; }}
+    .kpi-grid {{ display:grid; gap:.75rem; width:100%; margin:.15rem 0 .35rem; }}
+    .kpi {{ border:1px solid {colors["card_border"]}; border-radius:8px; padding:.55rem .6rem; background:{colors["card_background"]}; min-height:4.8rem; overflow:hidden; }}
+    .kpi-label {{ color:{colors["primary_text"]}; opacity:.68; font-size:.68rem; font-weight:750; text-transform:uppercase; letter-spacing:.035em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+    .kpi-value {{ font-size:clamp(.8rem, .9vw, 1.02rem); font-weight:820; line-height:1.12; margin-top:.18rem; overflow-wrap:anywhere; }}
     .placeholder {{ border:1px dashed {colors["card_border"]}; border-radius:8px; background:{colors["page_background"]}; padding:.75rem .85rem; margin:.45rem 0; font-size:.96rem; }}
+    .summary-row {{ border:1px solid {colors["card_border"]}; border-radius:8px; background:{colors["page_background"]}; padding:.62rem .72rem; margin:.45rem 0; }}
+    .summary-line {{ display:flex; justify-content:space-between; gap:.8rem; align-items:center; font-weight:760; }}
+    .summary-meta {{ color:{colors["secondary_text"]}; font-size:.82rem; margin-top:.14rem; }}
+    .summary-bar {{ height:.38rem; border-radius:99px; background:{colors["chart_grid"]}; margin-top:.45rem; overflow:hidden; }}
+    .summary-fill {{ height:100%; border-radius:99px; background:{colors["chart_primary"]}; }}
+    .rank-table {{ width:100%; border-collapse:collapse; font-size:.92rem; }}
+    .rank-table th {{ color:{colors["secondary_text"]}; font-size:.72rem; font-weight:850; text-align:left; text-transform:uppercase; letter-spacing:.04em; padding:.2rem .1rem .45rem; border-bottom:1px solid {colors["card_border"]}; }}
+    .rank-table th:last-child {{ text-align:right; }}
+    .rank-table td {{ padding:.58rem .1rem; border-bottom:1px solid {colors["card_border"]}; }}
+    .rank-table tr:last-child td {{ border-bottom:none; }}
+    .rank-number {{ color:{colors["secondary_text"]}; font-weight:800; width:2rem; }}
+    .rank-value {{ text-align:right; font-weight:800; }}
+    .rank-share {{ text-align:right; color:{colors["secondary_text"]}; font-weight:760; }}
+    .podium-grid {{ display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:.7rem; align-items:end; margin-top:.6rem; }}
+    .podium-card {{ border:1px solid {colors["card_border"]}; border-radius:8px; background:{colors["page_background"]}; padding:.75rem .65rem; text-align:center; }}
+    .podium-rank {{ color:{colors["chart_secondary"]}; font-size:.8rem; font-weight:850; text-transform:uppercase; letter-spacing:.04em; }}
+    .podium-day {{ font-size:1.08rem; font-weight:850; margin-top:.25rem; }}
+    .podium-value {{ margin-top:.35rem; font-weight:800; }}
+    .podium-meta {{ color:{colors["secondary_text"]}; font-size:.8rem; margin-top:.2rem; }}
+    .equal-card-short {{ min-height:320px; }}
+    .equal-card-medium {{ min-height:360px; }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -170,7 +194,7 @@ def sidebar_controls(df):
             unsafe_allow_html=True,
         )
         st.divider()
-        labels = {"Overview": "Overview", "Sales": "Sales", "Forecast": "Forecast", "Insights": "Insights", "Interactive Forecast": "Interative Forecast"}
+        labels = {"Overview": "Overview", "Sales": "Sales", "Forecast": "Forecast", "Interactive Forecast": "Interative Forecast"}
         page = st.radio("Menu", list(labels), format_func=lambda option: labels[option], label_visibility="collapsed")
         st.divider()
         st.markdown('<div class="sidebar-label">FILTERS</div>', unsafe_allow_html=True)
@@ -200,6 +224,8 @@ def prepare_dashboard_data(data):
         "top_item": revenue.groupby("item")["total_spent"].sum().idxmax() if not revenue.empty else "N/A",
     }
     metrics["aov"] = metrics["total"] / metrics["transactions"] if metrics["transactions"] else 0
+    active_days = trend["transaction_date"].dt.date.nunique()
+    metrics["average_daily"] = metrics["total"] / active_days if active_days else 0
 
     monthly = trend.groupby("month", as_index=False)["total_spent"].sum().sort_values("month")
     weekday = (
@@ -210,18 +236,21 @@ def prepare_dashboard_data(data):
     )
     province = revenue.groupby("province", as_index=False)["total_spent"].sum().sort_values("total_spent", ascending=False)
     products = revenue.groupby("item", as_index=False)["total_spent"].sum().sort_values("total_spent", ascending=False)
-    products["label"] = products["item"].map(lambda x: f"[{ITEM_BADGES.get(x, '?')}] {x}")
+    products["label"] = products["item"].map(product_label)
     location = revenue.groupby("location", as_index=False)["total_spent"].sum()
     activity = (
         trend.assign(
             weekday=pd.Categorical(trend["transaction_date"].dt.day_name().str[:3], ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]),
             month=trend["transaction_date"].dt.strftime("%b"),
+            month_num=trend["transaction_date"].dt.month,
         )
-        .groupby(["weekday", "month"], observed=False)
+        .groupby(["weekday", "month", "month_num"], observed=False)
         .size()
         .reset_index(name="transactions")
+        .sort_values(["month_num", "weekday"])
+        .drop(columns="month_num")
     )
-    return metrics, monthly, build_average_forecast(monthly), weekday, province, products, location, activity
+    return metrics, monthly, weekday, province, products, location, activity
 
 
 def main():
@@ -235,6 +264,10 @@ def main():
         st.error(error)
         st.stop()
 
+    monthly_forecast, six_month_forecast, daily_forecast, forecast_error = load_forecast_reports()
+    if forecast_error:
+        st.warning(forecast_error)
+
     st.markdown(f'<div class="title">{PAGE_TITLE}</div>', unsafe_allow_html=True)
     st.markdown('<div class="subtitle">Sales, customer activity, and forecast views for cafe performance.</div>', unsafe_allow_html=True)
 
@@ -244,17 +277,19 @@ def main():
         st.warning("No dated revenue rows are available for trend charts.")
         return
 
-    metrics, monthly, forecast, weekday, province, products, location, activity = prepared
+    metrics, monthly, weekday, province, products, location, activity = prepared
+    forecast = build_forecast_summary(monthly, monthly_forecast, six_month_forecast, daily_forecast)
     if page == "Overview":
-        render_overview(metrics, monthly, province, location)
+        render_overview(metrics, monthly, province, products, location, weekday)
     elif page == "Sales":
-        render_sales(monthly, weekday, province, products, location, activity)
+        render_sales(metrics, monthly, weekday, province, products, location, activity)
     elif page == "Forecast":
         render_forecast(monthly, forecast)
     elif page == "Interactive Forecast":
         render_interactive_forecast()
     else:
         render_insights(df, data, file)
+    # Insights is intentionally hidden for now.
 
  
 if __name__ == "__main__":
