@@ -23,7 +23,6 @@ import streamlit as st
 from pathlib import Path
 import sys
 import charts
-from charts import build_average_forecast
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -287,8 +286,8 @@ def main():
         render_forecast(monthly, forecast)
     elif page == "Interactive Forecast":
         render_interactive_forecast()
-    else:
-        render_insights(df, data, file)
+    #else:
+        #render_insights(df, data, file)
     # Insights is intentionally hidden for now.
 
  
