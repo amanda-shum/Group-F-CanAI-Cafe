@@ -102,10 +102,78 @@ def apply_theme(colors):
     header[data-testid="stHeader"] {{ background: {colors["sidebar_background"]}; }}
     [data-testid="stSidebarCollapsedControl"] {{ display:flex !important; visibility:visible; }}
     .stApp {{ background:{colors["page_background"]}; color:{colors["primary_text"]}; }}
-    .block-container {{ max-width:1420px; padding-top:3.2rem; padding-bottom:2.5rem; }}
-    [data-testid="stVerticalBlock"] {{ gap:1.35rem; }}
-    [data-testid="stHorizontalBlock"] {{ gap:1.35rem; }}
-    [data-testid="stVerticalBlockBorderWrapper"] {{ margin-top:.25rem; }}
+    .block-container {{
+    max-width:100%;
+    padding:1.05rem 1.1rem 1rem 1.1rem;
+}}
+
+[data-testid="stVerticalBlock"] {{
+    gap:.55rem;
+}}
+
+[data-testid="stHorizontalBlock"] {{
+    gap:.7rem;
+}}
+
+[data-testid="stVerticalBlockBorderWrapper"] {{
+    margin-top:0;
+}}
+
+div[data-testid="stVerticalBlockBorderWrapper"] {{
+    padding:.35rem .45rem;
+}}
+
+.title {{
+    font-size:1.75rem;
+    font-weight:800;
+    line-height:1;
+    margin-bottom:.15rem;
+}}
+
+.subtitle {{
+    color:{colors["primary_text"]};
+    opacity:.72;
+    font-size:.9rem;
+    margin:.15rem 0 .65rem;
+}}
+
+.section-heading {{
+    margin:.05rem 0 .35rem;
+}}
+
+.section-title {{
+    font-size:.98rem;
+    font-weight:760;
+    margin-bottom:.12rem;
+}}
+
+.note {{
+    color:{colors["primary_text"]};
+    opacity:.68;
+    font-size:.78rem;
+    margin-bottom:.25rem;
+}}
+
+.kpi-grid {{
+    display:grid;
+    gap:.45rem;
+    width:100%;
+    margin:.05rem 0 .15rem;
+}}
+
+.kpi {{
+    border:1px solid {colors["card_border"]};
+    border-radius:8px;
+    padding:.45rem .5rem;
+    background:{colors["card_background"]};
+    min-height:4.1rem;
+    overflow:hidden;
+}}
+
+.rank-table td {{
+    padding:.42rem .1rem;
+    border-bottom:1px solid {colors["card_border"]};
+}}
     div[data-testid="stVerticalBlockBorderWrapper"] {{
         
         background:{colors["card_background"]};
@@ -249,7 +317,70 @@ def prepare_dashboard_data(data):
         .sort_values(["month_num", "weekday"])
         .drop(columns="month_num")
     )
-    return metrics, monthly, weekday, province, products, location, activity
+
+    trend_heatmap = trend.copy()
+    trend_heatmap["month_label"] = trend_heatmap["transaction_date"].dt.strftime("%b")
+    trend_heatmap["month_num"] = trend_heatmap["transaction_date"].dt.month
+    trend_heatmap["weekday_full"] = pd.Categorical(
+        trend_heatmap["transaction_date"].dt.day_name(),
+        ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+        ordered=True,
+    )
+
+    province_item = (
+        revenue
+        .groupby(["province", "item"], as_index=False, observed=False)["total_spent"]
+        .sum()
+    )
+    province_total = province_item.groupby("province")["total_spent"].transform("sum")
+
+    province_item["province_total_sales"] = province_total
+
+    province_item["province_sales_share"] = (
+        province_item["total_spent"]
+        .div(province_total)
+        .mul(100)
+        .fillna(0)
+    )
+
+    province_month = (
+        trend_heatmap
+        .groupby(["province", "month_label", "month_num"], as_index=False, observed=False)["total_spent"]
+        .sum()
+        .sort_values(["month_num", "province"])
+        .drop(columns="month_num")
+    )
+
+    item_month = (
+        trend_heatmap
+        .groupby(["item", "month_label", "month_num"], as_index=False, observed=False)["total_spent"]
+        .sum()
+        .sort_values(["month_num", "item"])
+        .drop(columns="month_num")
+    )
+
+    province_weekday = (
+        trend_heatmap
+        .groupby(["province", "weekday_full"], as_index=False, observed=False)["total_spent"]
+        .sum()
+        .sort_values(["province", "weekday_full"])
+    )
+
+    item_weekday = (
+        trend_heatmap
+        .groupby(["item", "weekday_full"], as_index=False, observed=False)["total_spent"]
+        .sum()
+        .sort_values(["item", "weekday_full"])
+    )
+
+    sales_heatmaps = {
+        "province_item": province_item,
+        "province_month": province_month,
+        "item_month": item_month,
+        "province_weekday": province_weekday,
+        "item_weekday": item_weekday,
+    }
+    return metrics, monthly, weekday, province, products, location, activity, sales_heatmaps
 
 
 def main():
@@ -268,7 +399,6 @@ def main():
         st.warning(forecast_error)
 
     st.markdown(f'<div class="title">{PAGE_TITLE}</div>', unsafe_allow_html=True)
-    st.markdown('<div class="subtitle">Sales, customer activity, and forecast views for cafe performance.</div>', unsafe_allow_html=True)
 
     page, data = sidebar_controls(df)
     prepared = prepare_dashboard_data(data)
@@ -276,18 +406,18 @@ def main():
         st.warning("No dated revenue rows are available for trend charts.")
         return
 
-    metrics, monthly, weekday, province, products, location, activity = prepared
+    metrics, monthly, weekday, province, products, location, activity, sales_heatmaps = prepared
     forecast = build_forecast_summary(monthly, monthly_forecast, six_month_forecast, daily_forecast)
     if page == "Overview":
         render_overview(metrics, monthly, province, products, location, weekday)
     elif page == "Sales":
-        render_sales(metrics, monthly, weekday, province, products, location, activity)
+        render_sales(metrics, monthly, weekday, province, products, location, activity, sales_heatmaps)
     elif page == "Forecast":
         render_forecast(monthly, forecast)
     elif page == "Interactive Forecast":
         render_interactive_forecast()
-    else:
-        render_insights(df, data, file)
+    #else:
+        #render_insights(df, data, file)
     # Insights is intentionally hidden for now.
 
  
