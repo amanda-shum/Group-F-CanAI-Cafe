@@ -23,7 +23,6 @@ import streamlit as st
 from pathlib import Path
 import sys
 import charts
-from charts import build_average_forecast
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
