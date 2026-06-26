@@ -399,7 +399,6 @@ def main():
         st.warning(forecast_error)
 
     st.markdown(f'<div class="title">{PAGE_TITLE}</div>', unsafe_allow_html=True)
-    st.markdown('<div class="subtitle">Sales, customer activity, and forecast views for cafe performance.</div>', unsafe_allow_html=True)
 
     page, data = sidebar_controls(df)
     prepared = prepare_dashboard_data(data)
