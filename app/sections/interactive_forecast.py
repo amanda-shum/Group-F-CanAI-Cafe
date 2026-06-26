@@ -99,7 +99,8 @@ def render_interactive_forecast():
         fig.add_trace(go.Scatter(
             x=train.index,
             y=train["daily_total_sales"],
-            name="Historical"
+            name="Historical",
+            line=dict(color="#8FAF7C", width=2)
         ))
 
         # ✅ Last actual point (BONUS)
@@ -111,18 +112,12 @@ def render_interactive_forecast():
             name="Last Actual"
         ))
 
-        # ✅ Base forecast
-        fig.add_trace(go.Scatter(
-            x=forecast.index,
-            y=forecast["forecast"],
-            name="Base Forecast"
-        ))
-
         # ✅ Scenario forecast
         fig.add_trace(go.Scatter(
             x=forecast.index,
             y=forecast["adjusted"],
-            name="Scenario Forecast"
+            name="Scenario Forecast",
+            line=dict(color="#D1A85B", width=3)
         ))
 
         # ✅ Uncertainty band
@@ -130,7 +125,8 @@ def render_interactive_forecast():
             x=forecast.index,
             y=forecast["upper_adj"],
             line=dict(width=0),
-            showlegend=False
+            showlegend=False,
+            fillcolor='rgba(209, 168, 91, 0.2)'
         ))
 
         fig.add_trace(go.Scatter(
@@ -138,7 +134,8 @@ def render_interactive_forecast():
             y=forecast["lower_adj"],
             fill='tonexty',
             name="Uncertainty Range",
-            line=dict(width=0)
+            line=dict(width=0),
+            fillcolor='rgba(209, 168, 91, 0.2)'
         ))
 
         st.plotly_chart(fig, use_container_width=True)
@@ -214,7 +211,8 @@ def render_interactive_forecast():
         fig.add_trace(go.Scatter(
             x=history["date"],
             y=history["daily_total_sales"],
-            name="Historical"
+            name="Historical",
+            line=dict(color="#8FAF7C", width=2)
         ))
 
         # ✅ Last actual point (BONUS)
@@ -226,18 +224,12 @@ def render_interactive_forecast():
             name="Last Actual"
         ))
 
-        # ✅ Base forecast
-        fig.add_trace(go.Scatter(
-            x=forecast_filtered["date"],
-            y=forecast_filtered["forecast"],
-            name="Base Forecast"
-        ))
-
         # ✅ Scenario forecast
         fig.add_trace(go.Scatter(
             x=forecast_filtered["date"],
             y=forecast_filtered["adjusted"],
-            name="Scenario Forecast"
+            name="Scenario Forecast",
+            line=dict(color="#D1A85B", width=3)
         ))
 
         st.plotly_chart(fig, use_container_width=True)
