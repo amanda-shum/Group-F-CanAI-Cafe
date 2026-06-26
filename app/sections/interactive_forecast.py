@@ -22,7 +22,7 @@ def render_interactive_forecast():
     # =====================================================
     # ✅ FORECAST SETTINGS
     # =====================================================
-    st.subheader("⚙️ Forecast Settings")
+    st.subheader("Forecast Settings")
 
     col1, col2 = st.columns(2)
 
@@ -54,7 +54,7 @@ def render_interactive_forecast():
     # =====================================================
     # ✅ SCENARIO SETTINGS
     # =====================================================
-    st.subheader("📊 Scenario Simulation")
+    st.subheader("Scenario Simulation")
 
     col3, col4 = st.columns(2)
 
@@ -67,7 +67,7 @@ def render_interactive_forecast():
     # =====================================================
     # ✅ FORECAST SCOPE
     # =====================================================
-    st.subheader("📂 Forecast Scope")
+    st.subheader("Forecast Scope")
 
     scope = st.selectbox("Forecast Level", ["Overall", "Province", "Item"])
 
@@ -91,7 +91,7 @@ def render_interactive_forecast():
         forecast["lower_adj"] = forecast["lower_bound"] * uncertainty_multiplier
         forecast["upper_adj"] = forecast["upper_bound"] * uncertainty_multiplier
 
-        st.subheader("📊 Forecast Comparison")
+        st.subheader("Forecast Comparison")
 
         fig = go.Figure()
 
@@ -144,7 +144,7 @@ def render_interactive_forecast():
         st.plotly_chart(fig, use_container_width=True)
 
         # ✅ Business outputs
-        st.subheader("💼 Business Summary")
+        st.subheader("Business Summary")
 
         total = forecast["adjusted"].sum()
         avg = forecast["adjusted"].mean()
@@ -152,11 +152,6 @@ def render_interactive_forecast():
         colA, colB = st.columns(2)
         colA.metric("Total Forecast Revenue", f"${total:,.2f}")
         colB.metric("Average Daily Revenue", f"${avg:,.2f}")
-
-        if avg < 1000:
-            st.warning("⚠️ Forecast suggests weaker performance")
-        else:
-            st.success("✅ Forecast suggests strong performance")
 
         with st.expander("📄 View Forecast Data"):
             st.dataframe(forecast)
